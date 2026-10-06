@@ -216,12 +216,16 @@ public sealed class MockHttpMessageHandler : HttpMessageHandler
 
     public MockRoute WhenUrlContains(string substring)
     {
-        return When(req => req.RequestUri != null && req.RequestUri.ToString().Contains(substring, StringComparison.OrdinalIgnoreCase));
+        return When(req => req.RequestUri != null && (
+            req.RequestUri.ToString().Contains(substring, StringComparison.OrdinalIgnoreCase) ||
+            Uri.UnescapeDataString(req.RequestUri.ToString()).Contains(substring, StringComparison.OrdinalIgnoreCase)));
     }
 
     public MockRoute WhenMethodAndUrl(HttpMethod method, string substring)
     {
-        return When(req => req.Method == method && req.RequestUri != null && req.RequestUri.ToString().Contains(substring, StringComparison.OrdinalIgnoreCase));
+        return When(req => req.Method == method && req.RequestUri != null && (
+            req.RequestUri.ToString().Contains(substring, StringComparison.OrdinalIgnoreCase) ||
+            Uri.UnescapeDataString(req.RequestUri.ToString()).Contains(substring, StringComparison.OrdinalIgnoreCase)));
     }
 
     public MockRoute WhenGroups() => WhenUrlContains("/v1.0/groups");
@@ -282,6 +286,13 @@ public sealed class MockHttpMessageHandler : HttpMessageHandler
     public MockHttpMessageHandler SetupBatchResponses(params MockBatchSubResponse[] responses)
     {
         return SetupBatch(CreateBatchResponseBody(responses));
+    }
+
+    public MockHttpMessageHandler RegisterResponse(string method, string urlSubstring, HttpStatusCode statusCode = HttpStatusCode.OK, string json = "{}")
+    {
+        WhenMethodAndUrl(new HttpMethod(method), urlSubstring)
+            .RespondWithJson(json, statusCode);
+        return this;
     }
 
     public HttpClient ToHttpClient(Uri? baseAddress = null)
@@ -348,9 +359,34 @@ public sealed class MockHttpMessageHandler : HttpMessageHandler
             body = await request.Content.ReadAsStringAsync(cancellationToken);
         }
 
+        HttpRequestMessage recordedRequest;
+        if (request.RequestUri != null)
+        {
+            var unescapedUri = new Uri(Uri.UnescapeDataString(request.RequestUri.ToString()));
+            recordedRequest = new HttpRequestMessage(request.Method, unescapedUri);
+        }
+        else
+        {
+            recordedRequest = new HttpRequestMessage(request.Method, (Uri?)null);
+        }
+
+        if (request.Content != null)
+        {
+            recordedRequest.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            foreach (var header in request.Content.Headers)
+            {
+                recordedRequest.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+
+        foreach (var header in request.Headers)
+        {
+            recordedRequest.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
         lock (_lock)
         {
-            _sentRequests.Add(request);
+            _sentRequests.Add(recordedRequest);
             _sentRequestBodies.Add(body);
         }
 

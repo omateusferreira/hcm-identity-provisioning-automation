@@ -152,5 +152,29 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    public static IServiceCollection AddGraphEmailCredentialDeliveryService(
+        this IServiceCollection services,
+        Action<GraphEmailDeliveryOptions>? configureOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddOptions();
+        if (configureOptions != null)
+        {
+            services.Configure(configureOptions);
+        }
+
+        services.AddSingleton<GraphEmailCredentialDeliveryService>(sp =>
+        {
+            var graphClient = sp.GetRequiredService<GraphServiceClient>();
+            var options = sp.GetRequiredService<IOptions<GraphEmailDeliveryOptions>>();
+            var logger = sp.GetService<ILogger<GraphEmailCredentialDeliveryService>>() ?? NullLogger<GraphEmailCredentialDeliveryService>.Instance;
+            return new GraphEmailCredentialDeliveryService(graphClient, options, logger);
+        });
+
+        services.AddSingleton<ICredentialDeliveryService>(sp => sp.GetRequiredService<GraphEmailCredentialDeliveryService>());
+        return services;
+    }
 }
 
