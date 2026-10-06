@@ -1,7 +1,7 @@
 # Macro Execution Roadmap: HCM → Microsoft Entra ID Provisioning Engine
 
 - **Projeto:** HCM to Microsoft Entra ID Lifecycle & Provisioning Automation
-- **Status:** Ciclo 1 Pronto para Execução | Ciclos 2 e 3 Mapeados
+- **Status:** Ciclo 1 Concluído e Validado (123 testes) | Ciclo 2 Pronto para Planejamento
 - **Arquitetura Base:** [`docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md`](file:///d:/Projects/hcm-identity-provisioning-automation/docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md)
 - **Runtime:** .NET 10 (`net10.0`), C# 14
 
@@ -45,8 +45,8 @@ flowchart TD
 
 | Ciclo | Nome / Foco | Entregável Funcional | Plano Detalhado | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Ciclo 1** | **Núcleo do Motor & CLI Sandbox** | Engine de reconciliação em memória + CLI funcional (`hcm-sync`) operando sobre 6 cenários de RH. Zero dependência externa. | [`docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md`](file:///d:/Projects/hcm-identity-provisioning-automation/docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md) | **Pronto para Execução** |
-| **Ciclo 2** | **Adaptadores de Produção (Graph & REST)** | Implementação real do `IIdentityStore` (Microsoft Graph v5 via Managed Identity) e `IHcmConnector` (REST HTTP resiliente). | *A ser gerado após conclusão do Ciclo 1* | Aguardando Ciclo 1 |
+| **Ciclo 1** | **Núcleo do Motor & CLI Sandbox** | Engine de reconciliação em memória + CLI funcional (`hcm-sync`) operando sobre 6 cenários de RH. Zero dependência externa. | [`docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md`](file:///d:/Projects/hcm-identity-provisioning-automation/docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md) | **Concluído e Validado (123 testes)** |
+| **Ciclo 2** | **Adaptadores de Produção (Graph & REST)** | Implementação real do `IIdentityStore` (Microsoft Graph v5 via Managed Identity) e `IHcmConnector` (REST HTTP resiliente). | *A ser gerado após conclusão do Ciclo 1* | **Pronto para Planejamento** |
 | **Ciclo 3** | **Automação Serverless & Observabilidade** | Host Azure Functions (.NET Isolated), agendamento cron, webhook manual, envio seguro de credenciais e App Insights. | *A ser gerado após conclusão do Ciclo 2* | Aguardando Ciclo 2 |
 
 ---
