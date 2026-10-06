@@ -50,12 +50,15 @@ public sealed class InMemoryIdentityStore : IIdentityStore
     {
         lock (_mutationLock)
         {
+            Guid? lastCreatedGraphId = null;
+
             foreach (var action in actions)
             {
                 switch (action)
                 {
                     case CreateUserAction create:
                         var graphId = Guid.NewGuid();
+                        lastCreatedGraphId = graphId;
                         var newUser = new EntraUser(
                             graphId,
                             create.Employee.Id,
@@ -93,19 +96,27 @@ public sealed class InMemoryIdentityStore : IIdentityStore
                         break;
 
                     case AddGroupMemberAction addGroup:
-                        if (_usersByGraphId.TryGetValue(addGroup.GraphId, out var existingForAddGroup))
+                        var targetAddGraphId = addGroup.GraphId == Guid.Empty && lastCreatedGraphId.HasValue
+                            ? lastCreatedGraphId.Value
+                            : addGroup.GraphId;
+
+                        if (_usersByGraphId.TryGetValue(targetAddGraphId, out var existingForAddGroup))
                         {
                             var groups = new HashSet<Guid>(existingForAddGroup.AssignedGroupIds) { addGroup.GroupId };
-                            _usersByGraphId[addGroup.GraphId] = existingForAddGroup with { AssignedGroupIds = groups };
+                            _usersByGraphId[targetAddGraphId] = existingForAddGroup with { AssignedGroupIds = groups };
                         }
                         break;
 
                     case RemoveGroupMemberAction removeGroup:
-                        if (_usersByGraphId.TryGetValue(removeGroup.GraphId, out var existingForRemoveGroup))
+                        var targetRemoveGraphId = removeGroup.GraphId == Guid.Empty && lastCreatedGraphId.HasValue
+                            ? lastCreatedGraphId.Value
+                            : removeGroup.GraphId;
+
+                        if (_usersByGraphId.TryGetValue(targetRemoveGraphId, out var existingForRemoveGroup))
                         {
                             var groups = new HashSet<Guid>(existingForRemoveGroup.AssignedGroupIds);
                             groups.Remove(removeGroup.GroupId);
-                            _usersByGraphId[removeGroup.GraphId] = existingForRemoveGroup with { AssignedGroupIds = groups };
+                            _usersByGraphId[targetRemoveGraphId] = existingForRemoveGroup with { AssignedGroupIds = groups };
                         }
                         break;
                 }

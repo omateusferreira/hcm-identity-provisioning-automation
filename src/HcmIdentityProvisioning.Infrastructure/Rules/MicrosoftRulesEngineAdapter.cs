@@ -27,11 +27,34 @@ public sealed class MicrosoftRulesEngineAdapter : IRulesEngine
 
     public static MicrosoftRulesEngineAdapter FromFile(string filePath)
     {
-        if (!File.Exists(filePath))
+        var resolvedPath = ResolvePath(filePath);
+        if (!File.Exists(resolvedPath))
             throw new FileNotFoundException($"Rules file not found at '{filePath}'.");
 
-        var json = File.ReadAllText(filePath);
+        var json = File.ReadAllText(resolvedPath);
         return FromJsonString(json);
+    }
+
+    private static string ResolvePath(string path)
+    {
+        if (File.Exists(path))
+            return path;
+
+        var baseCandidate = Path.Combine(AppContext.BaseDirectory, path);
+        if (File.Exists(baseCandidate))
+            return baseCandidate;
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            var testPath = Path.Combine(dir.FullName, path);
+            if (File.Exists(testPath))
+                return testPath;
+
+            dir = dir.Parent;
+        }
+
+        return path;
     }
 
     public async Task<IReadOnlySet<string>> EvaluateDesiredGroupsAsync(Employee employee, CancellationToken ct = default)

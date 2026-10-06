@@ -47,6 +47,7 @@ public sealed class ReconcileBatchUseCase
         string? breakerMsg = null;
 
         var managedGroups = await _identityStore.GetManagedGroupsAsync(ct);
+        var allocatedUpns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         while (hasNext)
         {
@@ -64,10 +65,19 @@ public sealed class ReconcileBatchUseCase
                     existing,
                     _settings.TenantDomain,
                     managedGroups,
-                    upn => _identityStore.IsUserPrincipalNameAvailableAsync(upn, ct),
+                    async upn => !allocatedUpns.Contains(upn.Value) && await _identityStore.IsUserPrincipalNameAvailableAsync(upn, ct),
                     w => warnings.Add(w),
                     ct
                 );
+
+                foreach (var action in actions)
+                {
+                    if (action is CreateUserAction create)
+                    {
+                        allocatedUpns.Add(create.UserPrincipalName.Value);
+                    }
+                }
+
                 batchActions.AddRange(actions);
             }
 
