@@ -1,0 +1,14 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "SyncSchedule": "0 */30 * * * *",
+    "HcmSync__TenantDomain": "company.onmicrosoft.com",
+    "HcmSync__ManagedGroupPrefix": "grp-iam-",
+    "HcmSync__BatchPageSize": "50",
+    "HcmSync__MaxDisablementPercentage": "10.0",
+    "HcmSync__MaxDisablementCount": "25",
+    "GraphEmail__SenderEmail": "no-reply@company.com"
+  }
+}
