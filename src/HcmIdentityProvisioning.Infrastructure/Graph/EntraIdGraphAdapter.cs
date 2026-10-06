@@ -1,5 +1,6 @@
 namespace HcmIdentityProvisioning.Infrastructure.Graph;
 
+using System.Net;
 using Azure.Core;
 using Azure.Identity;
 using HcmIdentityProvisioning.Domain.Actions;
@@ -9,6 +10,8 @@ using HcmIdentityProvisioning.Domain.ValueObjects;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
+using Microsoft.Graph.Models;
+using Microsoft.Kiota.Abstractions;
 
 public class EntraIdGraphAdapter : IIdentityStore
 {
@@ -211,9 +214,252 @@ public class EntraIdGraphAdapter : IIdentityStore
         return usersByEmployeeId;
     }
 
-    public Task ApplyBatchMutationsAsync(IEnumerable<DeltaAction> actions, CancellationToken ct = default)
+    public async Task ApplyBatchMutationsAsync(IEnumerable<DeltaAction> actions, CancellationToken ct = default)
     {
-        throw new NotImplementedException("Batch mutations will be implemented in Task 5.");
+        ArgumentNullException.ThrowIfNull(actions);
+
+        var actionList = actions.ToList();
+        if (actionList.Count == 0)
+        {
+            return;
+        }
+
+        var batchSize = _options.MaxBatchSize > 0 ? _options.MaxBatchSize : 20;
+        _logger.LogInformation("Applying {Count} batch mutations chunked by {BatchSize}", actionList.Count, batchSize);
+
+        foreach (var chunk in actionList.Chunk(batchSize))
+        {
+            var shouldFastExit = await ProcessBatchChunkAsync(chunk, ct);
+            if (shouldFastExit)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task<bool> ProcessBatchChunkAsync(IReadOnlyList<DeltaAction> chunk, CancellationToken ct)
+    {
+        var batch = new BatchRequestContentCollection(_graphClient);
+        var actionByStepId = new Dictionary<string, DeltaAction>();
+
+        foreach (var action in chunk)
+        {
+            var reqInfo = CreateRequestInformationForAction(action);
+            var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+            actionByStepId[stepId] = action;
+        }
+
+        var batchResponse = await _graphClient.Batch.PostAsync(batch, ct);
+        var statusCodes = await batchResponse.GetResponsesStatusCodesAsync();
+
+        var throttledActions = new List<DeltaAction>();
+        int maxRetryAfterSeconds = 0;
+        var unhandledFailures = new List<(string StepId, DeltaAction Action, HttpStatusCode StatusCode)>();
+
+        foreach (var (stepId, action) in actionByStepId)
+        {
+            if (!statusCodes.TryGetValue(stepId, out var statusCode))
+            {
+                continue;
+            }
+
+            if (IsSuccessStatusCode(statusCode))
+            {
+                continue;
+            }
+
+            if (IsIdempotentGroupSuccess(action, statusCode))
+            {
+                _logger.LogDebug(
+                    "Idempotent group failure tolerated for action {ActionName} on target {Target} (Status: {StatusCode})",
+                    action.ActionName, action.TargetGraphId, statusCode);
+                continue;
+            }
+
+            if (statusCode == HttpStatusCode.TooManyRequests)
+            {
+                var subResponse = await batchResponse.GetResponseByIdAsync(stepId);
+                var retryAfter = ExtractRetryAfterSeconds(subResponse);
+                if (retryAfter <= 0)
+                {
+                    retryAfter = 1;
+                }
+
+                if (retryAfter > maxRetryAfterSeconds)
+                {
+                    maxRetryAfterSeconds = retryAfter;
+                }
+
+                throttledActions.Add(action);
+                continue;
+            }
+
+            // 5xx or unhandled non-success
+            _logger.LogError(
+                "ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {StepId} for action {ActionName} failed with status {StatusCode}",
+                stepId, action.ActionName, statusCode);
+            unhandledFailures.Add((stepId, action, statusCode));
+        }
+
+        if (throttledActions.Count > 0)
+        {
+            if (maxRetryAfterSeconds > _options.MaxImmediateRetryDelaySeconds)
+            {
+                _logger.LogWarning(
+                    "WARNING_GRAPH_THROTTLE_FAST_EXIT: Long throttle detected (Retry-After: {RetryAfter}s > {MaxDelay}s). Fast-exiting without blocking.",
+                    maxRetryAfterSeconds, _options.MaxImmediateRetryDelaySeconds);
+                return true; // Fast-Exit
+            }
+
+            var delaySeconds = Math.Max(1, maxRetryAfterSeconds);
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct);
+
+            var retrySuccess = await RetryThrottledActionsAsync(throttledActions, ct);
+            if (!retrySuccess)
+            {
+                _logger.LogWarning(
+                    "WARNING_GRAPH_THROTTLE_FAST_EXIT: Subrequest retry failed or re-throttled. Fast-exiting without blocking.");
+                return true; // Fast-Exit
+            }
+        }
+
+        if (unhandledFailures.Count > 0)
+        {
+            var first = unhandledFailures[0];
+            throw new HttpRequestException(
+                $"ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {first.StepId} for action {first.Action.ActionName} failed with status {first.StatusCode}",
+                null,
+                first.StatusCode);
+        }
+
+        return false;
+    }
+
+    private async Task<bool> RetryThrottledActionsAsync(IReadOnlyList<DeltaAction> actions, CancellationToken ct)
+    {
+        var batch = new BatchRequestContentCollection(_graphClient);
+        var actionByStepId = new Dictionary<string, DeltaAction>();
+
+        foreach (var action in actions)
+        {
+            var reqInfo = CreateRequestInformationForAction(action);
+            var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+            actionByStepId[stepId] = action;
+        }
+
+        var batchResponse = await _graphClient.Batch.PostAsync(batch, ct);
+        var statusCodes = await batchResponse.GetResponsesStatusCodesAsync();
+
+        foreach (var (stepId, action) in actionByStepId)
+        {
+            if (!statusCodes.TryGetValue(stepId, out var statusCode))
+            {
+                return false;
+            }
+
+            if (IsSuccessStatusCode(statusCode) || IsIdempotentGroupSuccess(action, statusCode))
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private RequestInformation CreateRequestInformationForAction(DeltaAction action) => action switch
+    {
+        CreateUserAction create => _graphClient.Users.ToPostRequestInformation(new User
+        {
+            AccountEnabled = true,
+            DisplayName = create.Employee.FullName,
+            MailNickname = create.UserPrincipalName.Username,
+            UserPrincipalName = create.UserPrincipalName.Value,
+            EmployeeId = create.Employee.Id.Value,
+            PasswordProfile = new PasswordProfile
+            {
+                ForceChangePasswordNextSignIn = true,
+                Password = create.TemporaryPassword
+            }
+        }),
+
+        UpdateDisplayNameAction update => _graphClient.Users[update.GraphId.ToString()].ToPatchRequestInformation(new User
+        {
+            DisplayName = update.NewDisplayName
+        }),
+
+        EnableAccountAction enable => _graphClient.Users[enable.GraphId.ToString()].ToPatchRequestInformation(new User
+        {
+            AccountEnabled = true
+        }),
+
+        DisableAccountAction disable => _graphClient.Users[disable.GraphId.ToString()].ToPatchRequestInformation(new User
+        {
+            AccountEnabled = false
+        }),
+
+        RevokeSessionsAction revoke => _graphClient.Users[revoke.GraphId.ToString()].RevokeSignInSessions.ToPostRequestInformation(),
+
+        AddGroupMemberAction addGroup => _graphClient.Groups[addGroup.GroupId.ToString()].Members.Ref.ToPostRequestInformation(new ReferenceCreate
+        {
+            OdataId = $"https://graph.microsoft.com/v1.0/directoryObjects/{addGroup.GraphId}"
+        }),
+
+        RemoveGroupMemberAction removeGroup => _graphClient.Groups[removeGroup.GroupId.ToString()].Members[removeGroup.GraphId.ToString()].Ref.ToDeleteRequestInformation(),
+
+        _ => throw new NotSupportedException($"Action type {action.GetType().Name} is not supported by Graph batch mutations.")
+    };
+
+    private static bool IsSuccessStatusCode(HttpStatusCode code) =>
+        (int)code >= 200 && (int)code <= 299;
+
+    private static bool IsIdempotentGroupSuccess(DeltaAction action, HttpStatusCode code)
+    {
+        if (action is AddGroupMemberAction && (code == HttpStatusCode.BadRequest || code == HttpStatusCode.Conflict))
+        {
+            return true;
+        }
+
+        if (action is RemoveGroupMemberAction && code == HttpStatusCode.NotFound)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static int ExtractRetryAfterSeconds(HttpResponseMessage? response)
+    {
+        if (response == null)
+        {
+            return 0;
+        }
+
+        if (response.Headers.RetryAfter != null)
+        {
+            if (response.Headers.RetryAfter.Delta.HasValue)
+            {
+                return (int)Math.Ceiling(response.Headers.RetryAfter.Delta.Value.TotalSeconds);
+            }
+
+            if (response.Headers.RetryAfter.Date.HasValue)
+            {
+                var diff = response.Headers.RetryAfter.Date.Value - DateTimeOffset.UtcNow;
+                return (int)Math.Max(1, Math.Ceiling(diff.TotalSeconds));
+            }
+        }
+
+        if (response.Headers.TryGetValues("Retry-After", out var values))
+        {
+            var first = values.FirstOrDefault();
+            if (int.TryParse(first, out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return 0;
     }
 
     private async Task<IReadOnlySet<Guid>> ResolveManagedGroupsForUserAsync(
