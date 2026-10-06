@@ -1,28 +1,27 @@
-# HCM → Microsoft Entra ID Provisioning & Synchronization Implementation Plan
+# HCM → Microsoft Entra ID Provisioning: Ciclo 1 (Núcleo do Motor & CLI Sandbox) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a production-grade, self-hosted Identity Governance & Lifecycle Engine in .NET 10 to synchronize employee lifecycles from HCM systems to Microsoft Entra ID (Free tier compatible) using Clean Architecture, DDD, and declarative reconciliation.
+**Goal:** Implementar o núcleo desacoplado do motor de governança de identidades e reconciliação declarativa, com suporte completo aos 6 cenários de RH (Joiner, Mover, Leaver, Homônimos, Diacríticos e Idempotência) e um utilitário CLI executável localmente e 100% autossuficiente (sem necessidade de conexão ou credenciais de nuvem).
 
-**Architecture:** Hexagonal / Clean Architecture with a pure Domain core, Application reconciliation use cases (`DesiredState` vs `ActualState` producing an idempotent `ChangeSet`), Infrastructure adapters (Microsoft Graph SDK v5, In-Memory Store, Synthetic & REST HCM connectors, `Microsoft.RulesEngine`, CSPRNG passwords, Circuit Breaker), and two hosts (CLI Console for local audits/sandbox and Azure Functions Isolated Worker for automated cloud execution).
+**Architecture:** Clean Architecture / Hexagonal Architecture em .NET 10. Camada de Domínio pura (C# 14, zero dependências externas), motor declarativo de reconciliação em Aplicação (`DesiredState` vs `ActualState` gerando `ChangeSet` idempotente), adaptadores de Infraestrutura em memória (RulesEngine, gerador CSPRNG, Conector Sintético com fixtures e In-Memory Store thread-safe) e CLI em `System.CommandLine`.
 
-**Tech Stack:** .NET 10 (`net10.0`), C# 14, `Microsoft.Graph` v5+, `Azure.Identity`, `Microsoft.RulesEngine`, `System.CommandLine`, `Microsoft.Azure.Functions.Worker`, xUnit, `FluentAssertions`, `NSubstitute`.
+**Tech Stack:** .NET 10 (`net10.0`), C# 14, `RulesEngine` (5.0.3), `System.CommandLine` (2.0.0-beta4), xUnit, `FluentAssertions`, `NSubstitute`.
 
 **Spec:** [`docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md`](file:///d:/Projects/hcm-identity-provisioning-automation/docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md)
 
 ## Global Constraints
 
-- Target Runtime: `net10.0` with C# 14 (`<Nullable>enable</Nullable>`, `<ImplicitUsings>enable</ImplicitUsings>`).
-- Domain Layer: Strictly pure C# with zero external NuGet packages.
-- Directory Structure: `src/` for production code, `tests/` for unit and integration test projects.
-- Group Scope: Strict blast radius boundary targeting `grp-iam-*` or groups registered in `rules.json`. Unmanaged groups are never altered.
-- Missing Groups: Pre-existing groups model. If a resolved managed group does not exist in the store, log `WARNING_MANAGED_GROUP_NOT_FOUND` and skip association without breaking user sync.
-- Circuit Breaker: Halt destructive operations (`DisableAccountAction`, `RevokeSessionsAction`) if disablement exceeds threshold (default: 10% rate or 25 count), preserving joiners if `HaltAllOperationsOnTrip` is false.
-- Secrets & Credentials: Zero storage or logging of cleartext passwords.
+- Target Framework: `net10.0` com C# 14 (`<Nullable>enable</Nullable>`, `<ImplicitUsings>enable</ImplicitUsings>`).
+- Pure Domain: `HcmIdentityProvisioning.Domain` não possui nenhuma referência a pacotes NuGet externos.
+- Managed Group Boundary: O motor só altera associações de grupos que comecem com `grp-iam-` ou declarados em `rules.json`. Grupos fora desse escopo permanecem intocados.
+- Missing Groups Policy: Se um grupo gerenciado indicado pelas regras não existir na store, emite aviso estruturado `WARNING_MANAGED_GROUP_NOT_FOUND` e ignora a atribuição daquele grupo sem interromper a sincronização do colaborador ou do lote.
+- Circuit Breaker: Desarma se a taxa de desativação do lote for > 10% ou contagem > 25, suspendendo ações destrutivas (`DisableAccountAction`, `RevokeSessionsAction`).
+- Credential Safety: Senhas temporárias são geradas via CSPRNG de 24 caracteres e nunca são expostas em logs.
 
 ---
 
-### Task 1: Solution Scaffolding & Project Setup
+### Task 1: Scaffolding da Solução e Projetos do Ciclo 1
 
 **Files:**
 - Create: `HcmIdentityProvisioning.sln`
@@ -30,16 +29,15 @@
 - Create: `src/HcmIdentityProvisioning.Application/HcmIdentityProvisioning.Application.csproj`
 - Create: `src/HcmIdentityProvisioning.Infrastructure/HcmIdentityProvisioning.Infrastructure.csproj`
 - Create: `src/HcmIdentityProvisioning.Cli/HcmIdentityProvisioning.Cli.csproj`
-- Create: `src/HcmIdentityProvisioning.Functions/HcmIdentityProvisioning.Functions.csproj`
 - Create: `tests/HcmIdentityProvisioning.Domain.Tests/HcmIdentityProvisioning.Domain.Tests.csproj`
 - Create: `tests/HcmIdentityProvisioning.Application.Tests/HcmIdentityProvisioning.Application.Tests.csproj`
 - Create: `tests/HcmIdentityProvisioning.Infrastructure.Tests/HcmIdentityProvisioning.Infrastructure.Tests.csproj`
 
 **Interfaces:**
 - Consumes: None
-- Produces: Visual Studio / .NET Solution linking all 5 src projects and 3 test projects with proper inward project references.
+- Produces: Estrutura completa de solução .NET 10 compilável com referências arquiteturais estritas.
 
-- [ ] **Step 1: Create solution and class library projects via dotnet CLI**
+- [ ] **Step 1: Criar solução e projetos via .NET CLI**
 
 ```powershell
 dotnet new sln -n HcmIdentityProvisioning
@@ -47,23 +45,21 @@ dotnet new classlib -n HcmIdentityProvisioning.Domain -o src/HcmIdentityProvisio
 dotnet new classlib -n HcmIdentityProvisioning.Application -o src/HcmIdentityProvisioning.Application -f net10.0
 dotnet new classlib -n HcmIdentityProvisioning.Infrastructure -o src/HcmIdentityProvisioning.Infrastructure -f net10.0
 dotnet new console -n HcmIdentityProvisioning.Cli -o src/HcmIdentityProvisioning.Cli -f net10.0
-dotnet new classlib -n HcmIdentityProvisioning.Functions -o src/HcmIdentityProvisioning.Functions -f net10.0
 dotnet new xunit -n HcmIdentityProvisioning.Domain.Tests -o tests/HcmIdentityProvisioning.Domain.Tests -f net10.0
 dotnet new xunit -n HcmIdentityProvisioning.Application.Tests -o tests/HcmIdentityProvisioning.Application.Tests -f net10.0
 dotnet new xunit -n HcmIdentityProvisioning.Infrastructure.Tests -o tests/HcmIdentityProvisioning.Infrastructure.Tests -f net10.0
 ```
 
-- [ ] **Step 2: Link project references and add to solution**
+- [ ] **Step 2: Configurar referências entre projetos e adicionar à solução**
 
 ```powershell
 dotnet sln add (Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object { $_.FullName })
 
-# Dependency boundaries
+# Inward dependency rule
 dotnet add src/HcmIdentityProvisioning.Application/HcmIdentityProvisioning.Application.csproj reference src/HcmIdentityProvisioning.Domain/HcmIdentityProvisioning.Domain.csproj
 dotnet add src/HcmIdentityProvisioning.Infrastructure/HcmIdentityProvisioning.Infrastructure.csproj reference src/HcmIdentityProvisioning.Domain/HcmIdentityProvisioning.Domain.csproj
 dotnet add src/HcmIdentityProvisioning.Infrastructure/HcmIdentityProvisioning.Infrastructure.csproj reference src/HcmIdentityProvisioning.Application/HcmIdentityProvisioning.Application.csproj
 dotnet add src/HcmIdentityProvisioning.Cli/HcmIdentityProvisioning.Cli.csproj reference src/HcmIdentityProvisioning.Infrastructure/HcmIdentityProvisioning.Infrastructure.csproj
-dotnet add src/HcmIdentityProvisioning.Functions/HcmIdentityProvisioning.Functions.csproj reference src/HcmIdentityProvisioning.Infrastructure/HcmIdentityProvisioning.Infrastructure.csproj
 
 # Test references
 dotnet add tests/HcmIdentityProvisioning.Domain.Tests/HcmIdentityProvisioning.Domain.Tests.csproj reference src/HcmIdentityProvisioning.Domain/HcmIdentityProvisioning.Domain.csproj
@@ -71,7 +67,7 @@ dotnet add tests/HcmIdentityProvisioning.Application.Tests/HcmIdentityProvisioni
 dotnet add tests/HcmIdentityProvisioning.Infrastructure.Tests/HcmIdentityProvisioning.Infrastructure.Tests.csproj reference src/HcmIdentityProvisioning.Infrastructure/HcmIdentityProvisioning.Infrastructure.csproj
 ```
 
-- [ ] **Step 3: Add test assertion packages and clean template boilerplate**
+- [ ] **Step 3: Instalar pacotes de teste e limpar arquivos de template**
 
 ```powershell
 Get-ChildItem -Recurse -Filter "Class1.cs" | Remove-Item -Force
@@ -84,7 +80,7 @@ dotnet add tests/HcmIdentityProvisioning.Infrastructure.Tests package FluentAsse
 dotnet add tests/HcmIdentityProvisioning.Infrastructure.Tests package NSubstitute
 ```
 
-- [ ] **Step 4: Verify solution builds cleanly**
+- [ ] **Step 4: Compilar e verificar solução**
 
 Run: `dotnet build`
 Expected: `Build succeeded. 0 Warning(s) 0 Error(s)`
@@ -93,7 +89,7 @@ Expected: `Build succeeded. 0 Warning(s) 0 Error(s)`
 
 ```bash
 git add HcmIdentityProvisioning.sln src/ tests/
-git commit -m "chore: scaffold .NET 10 solution and Clean Architecture project layout"
+git commit -m "chore: scaffold .NET 10 solution and projects for Cycle 1"
 ```
 
 ---
@@ -111,12 +107,12 @@ git commit -m "chore: scaffold .NET 10 solution and Clean Architecture project l
 **Interfaces:**
 - Consumes: None
 - Produces:
-  - `Result<TValue, TError>`
-  - `EmployeeId.Create(string value)`
-  - `UserPrincipalName.Create(string value)`
-  - `EmailAddress.Create(string value)`
+  - `Result<TValue, TError>.Success(TValue)` / `Failure(TError)`
+  - `EmployeeId.Create(string? value)`
+  - `UserPrincipalName.Create(string? value)`
+  - `EmailAddress.Create(string? value)`
 
-- [ ] **Step 1: Write failing tests for EmployeeId and UserPrincipalName**
+- [ ] **Step 1: Escrever testes que falham para EmployeeId e UserPrincipalName**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Domain.Tests/ValueObjects/EmployeeIdTests.cs
@@ -134,7 +130,7 @@ public class EmployeeIdTests
     [InlineData("   ")]
     public void Create_WithInvalidValue_ShouldFail(string? raw)
     {
-        var result = EmployeeId.Create(raw!);
+        var result = EmployeeId.Create(raw);
         result.IsSuccess.Should().BeFalse();
         result.Error.Should().NotBeNullOrWhiteSpace();
     }
@@ -181,12 +177,12 @@ public class UserPrincipalNameTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Executar testes para verificar falha de compilação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Domain.Tests --filter FullyQualifiedName~ValueObjects`
-Expected: FAIL with compilation errors (types not found).
+Expected: FAIL (tipos não existem).
 
-- [ ] **Step 3: Implement Result<TValue, TError> and Value Objects**
+- [ ] **Step 3: Implementar Result<TValue, TError> e os Value Objects**
 
 ```csharp
 // src/HcmIdentityProvisioning.Domain/Common/Result.cs
@@ -232,7 +228,7 @@ public sealed record EmployeeId
     public static Result<EmployeeId, string> Create(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
-            return Result<EmployeeId, string>.Failure("EmployeeId cannot be null or empty.");
+            return Result<EmployeeId, string>.Failure("EmployeeId cannot be null or whitespace.");
 
         return Result<EmployeeId, string>.Success(new EmployeeId(value.Trim()));
     }
@@ -301,10 +297,10 @@ public sealed record EmailAddress
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Domain.Tests --filter FullyQualifiedName~ValueObjects`
-Expected: PASS (all tests pass).
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -328,13 +324,11 @@ git commit -m "feat(domain): add Result primitive and Value Objects (EmployeeId,
 **Interfaces:**
 - Consumes: `EmployeeId`, `UserPrincipalName`
 - Produces:
-  - `EmployeeStatus` (Active, Inactive)
-  - `Employee` record
-  - `EntraUser` record
-  - `ManagedGroup` record
-  - `DeltaAction` and derived records (`CreateUserAction`, `UpdateDisplayNameAction`, `EnableAccountAction`, `DisableAccountAction`, `RevokeSessionsAction`, `AddGroupMemberAction`, `RemoveGroupMemberAction`)
+  - `EmployeeStatus.Active`, `EmployeeStatus.Inactive`
+  - `Employee`, `EntraUser`, `ManagedGroup`
+  - `DeltaAction` (subtipos: `CreateUserAction`, `UpdateDisplayNameAction`, `EnableAccountAction`, `DisableAccountAction`, `RevokeSessionsAction`, `AddGroupMemberAction`, `RemoveGroupMemberAction`)
 
-- [ ] **Step 1: Write failing test for Entity instantiations and DeltaAction polymorphism**
+- [ ] **Step 1: Escrever teste para entidades e polimorfismo de ações**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Domain.Tests/Entities/EntityTests.cs
@@ -383,12 +377,12 @@ public class EntityTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Executar teste para verificar falha**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Domain.Tests --filter FullyQualifiedName~EntityTests`
-Expected: FAIL (missing types).
+Expected: FAIL.
 
-- [ ] **Step 3: Implement Enums, Entities and DeltaActions**
+- [ ] **Step 3: Implementar Enums, Entidades e DeltaActions**
 
 ```csharp
 // src/HcmIdentityProvisioning.Domain/Enums/EmployeeStatus.cs
@@ -513,7 +507,7 @@ public sealed record RemoveGroupMemberAction(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Domain.Tests --filter FullyQualifiedName~EntityTests`
 Expected: PASS.
@@ -539,10 +533,10 @@ git commit -m "feat(domain): add Employee, EntraUser, ManagedGroup entities and 
 - Create: `src/HcmIdentityProvisioning.Domain/Policies/ISecurePasswordGenerator.cs`
 
 **Interfaces:**
-- Consumes: Entities, ValueObjects, DeltaActions
-- Produces: Clean hexagonal ports for Infrastructure adapters to implement.
+- Consumes: Entidades, ValueObjects, Ações
+- Produces: Contratos de portas e políticas hexagonais.
 
-- [ ] **Step 1: Implement PagedResult<T>**
+- [ ] **Step 1: Implementar PagedResult<T>**
 
 ```csharp
 // src/HcmIdentityProvisioning.Domain/Common/PagedResult.cs
@@ -557,7 +551,7 @@ public sealed record PagedResult<T>(
 );
 ```
 
-- [ ] **Step 2: Implement Ports & Policy interfaces in Domain**
+- [ ] **Step 2: Implementar Portas e Políticas do Domínio**
 
 ```csharp
 // src/HcmIdentityProvisioning.Domain/Ports/IHcmConnector.cs
@@ -655,7 +649,7 @@ public interface ISecurePasswordGenerator
 }
 ```
 
-- [ ] **Step 3: Verify Domain project compiles cleanly**
+- [ ] **Step 3: Compilar projeto Domain**
 
 Run: `dotnet build src/HcmIdentityProvisioning.Domain`
 Expected: `Build succeeded. 0 Warning(s) 0 Error(s)`
@@ -664,7 +658,7 @@ Expected: `Build succeeded. 0 Warning(s) 0 Error(s)`
 
 ```bash
 git add src/HcmIdentityProvisioning.Domain/
-git commit -m "feat(domain): define core Ports (IHcmConnector, IIdentityStore, IRulesEngine) and Policies"
+git commit -m "feat(domain): define hexagonal ports (IHcmConnector, IIdentityStore, IRulesEngine) and policies"
 ```
 
 ---
@@ -680,11 +674,11 @@ git commit -m "feat(domain): define core Ports (IHcmConnector, IIdentityStore, I
 **Interfaces:**
 - Consumes: `ISecurePasswordGenerator`, `IIdentityStore`, `UserPrincipalName`
 - Produces:
-  - `UpnSanitizer.Sanitize(string fullName, string domain)`
-  - `UpnSanitizer.ResolveCollisionAsync(string baseUsername, string domain, IIdentityStore store)`
-  - `SecurePasswordGenerator.GeneratePassword(int length)`
+  - `UpnSanitizer.SanitizeNameToSlug(string fullName)`
+  - `UpnSanitizer.ResolveAvailableUpnAsync(...)`
+  - `SecurePasswordGenerator : ISecurePasswordGenerator`
 
-- [ ] **Step 1: Write failing tests for UpnSanitizer and SecurePasswordGenerator**
+- [ ] **Step 1: Escrever testes que falham para UpnSanitizer e SecurePasswordGenerator**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Infrastructure.Tests/Security/UpnSanitizerTests.cs
@@ -714,7 +708,6 @@ public class UpnSanitizerTests
     public async Task ResolveAvailableUpnAsync_WhenCollisionExists_AppendsIncrement()
     {
         var store = Substitute.For<IIdentityStore>();
-        // john.doe@corp.com is taken, john.doe2@corp.com is free
         store.IsUserPrincipalNameAvailableAsync(Arg.Is<UserPrincipalName>(u => u.Value == "john.doe@corp.com"))
             .Returns(false);
         store.IsUserPrincipalNameAvailableAsync(Arg.Is<UserPrincipalName>(u => u.Value == "john.doe2@corp.com"))
@@ -752,12 +745,12 @@ public class SecurePasswordGeneratorTests
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Executar testes para verificar falha**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~Security`
-Expected: FAIL (missing types).
+Expected: FAIL.
 
-- [ ] **Step 3: Implement UpnSanitizer and SecurePasswordGenerator**
+- [ ] **Step 3: Implementar UpnSanitizer e SecurePasswordGenerator**
 
 ```csharp
 // src/HcmIdentityProvisioning.Infrastructure/Security/UpnSanitizer.cs
@@ -776,28 +769,22 @@ public static class UpnSanitizer
         if (string.IsNullOrWhiteSpace(fullName))
             return "user";
 
-        // Remove diacritics
         var normalized = fullName.Normalize(NormalizationForm.FormD);
         var sb = new StringBuilder();
         foreach (var c in normalized)
         {
-            var uc = CharUnicodeInfo.GetUnicodeCategory(c);
-            if (uc != UnicodeCategory.NonSpacingMark)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
                 sb.Append(c);
         }
 
-        var clean = sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
-        clean = clean.Replace("'", "").Replace("\"", "");
+        var clean = sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant()
+            .Replace("'", "").Replace("\"", "");
 
-        // Split by whitespace/hyphen
         var parts = Regex.Split(clean, @"\s+").Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
         if (parts.Count == 0) return "user";
         if (parts.Count == 1) return parts[0];
 
-        // Format as first.last
-        var first = parts.First();
-        var last = parts.Last();
-        return $"{first}.{last}";
+        return $"{parts.First()}.{parts.Last()}";
     }
 
     public static async Task<UserPrincipalName> ResolveAvailableUpnAsync(
@@ -813,13 +800,13 @@ public static class UpnSanitizer
         int counter = 2;
         while (counter < 1000)
         {
-            var nextCandidate = UserPrincipalName.Create($"{slug}{counter}@{domain}").Value;
-            if (await store.IsUserPrincipalNameAvailableAsync(nextCandidate, ct))
-                return nextCandidate;
+            var next = UserPrincipalName.Create($"{slug}{counter}@{domain}").Value;
+            if (await store.IsUserPrincipalNameAvailableAsync(next, ct))
+                return next;
             counter++;
         }
 
-        throw new InvalidOperationException($"Unable to allocate unique UPN for slug '{slug}' after 1000 attempts.");
+        throw new InvalidOperationException($"Could not allocate available UPN for '{slug}'.");
     }
 }
 ```
@@ -860,7 +847,7 @@ public sealed class SecurePasswordGenerator : ISecurePasswordGenerator
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~Security`
 Expected: PASS.
@@ -869,7 +856,7 @@ Expected: PASS.
 
 ```bash
 git add src/HcmIdentityProvisioning.Infrastructure/ tests/HcmIdentityProvisioning.Infrastructure.Tests/
-git commit -m "feat(infra): implement UpnSanitizer and cryptographic SecurePasswordGenerator"
+git commit -m "feat(infra): implement UpnSanitizer with diacritic removal and SecurePasswordGenerator"
 ```
 
 ---
@@ -882,16 +869,16 @@ git commit -m "feat(infra): implement UpnSanitizer and cryptographic SecurePassw
 - Test: `tests/HcmIdentityProvisioning.Infrastructure.Tests/Rules/MicrosoftRulesEngineAdapterTests.cs`
 
 **Interfaces:**
-- Consumes: `Microsoft.RulesEngine` NuGet, `Employee`, `IRulesEngine`
+- Consumes: `RulesEngine` (5.0.3), `IRulesEngine`, `Employee`
 - Produces: `MicrosoftRulesEngineAdapter : IRulesEngine`
 
-- [ ] **Step 1: Add Microsoft.RulesEngine package to Infrastructure**
+- [ ] **Step 1: Adicionar pacote RulesEngine ao projeto Infrastructure**
 
 ```powershell
 dotnet add src/HcmIdentityProvisioning.Infrastructure package RulesEngine --version 5.0.3
 ```
 
-- [ ] **Step 2: Create default rules.json in Infrastructure**
+- [ ] **Step 2: Criar arquivo de regras padrão `rules.json`**
 
 ```json
 // src/HcmIdentityProvisioning.Infrastructure/Rules/rules.json
@@ -919,7 +906,7 @@ dotnet add src/HcmIdentityProvisioning.Infrastructure package RulesEngine --vers
 ]
 ```
 
-- [ ] **Step 3: Write failing test for MicrosoftRulesEngineAdapter**
+- [ ] **Step 3: Escrever teste que falha para avaliação de regras**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Infrastructure.Tests/Rules/MicrosoftRulesEngineAdapterTests.cs
@@ -973,12 +960,12 @@ public class MicrosoftRulesEngineAdapterTests
 }
 ```
 
-- [ ] **Step 4: Run test to verify it fails**
+- [ ] **Step 4: Executar teste para verificar falha**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~Rules`
-Expected: FAIL (missing `MicrosoftRulesEngineAdapter`).
+Expected: FAIL.
 
-- [ ] **Step 5: Implement MicrosoftRulesEngineAdapter**
+- [ ] **Step 5: Implementar MicrosoftRulesEngineAdapter**
 
 ```csharp
 // src/HcmIdentityProvisioning.Infrastructure/Rules/MicrosoftRulesEngineAdapter.cs
@@ -1045,7 +1032,7 @@ public sealed class MicrosoftRulesEngineAdapter : IRulesEngine
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Step 6: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~Rules`
 Expected: PASS.
@@ -1054,12 +1041,12 @@ Expected: PASS.
 
 ```bash
 git add src/HcmIdentityProvisioning.Infrastructure/ tests/HcmIdentityProvisioning.Infrastructure.Tests/
-git commit -m "feat(infra): implement MicrosoftRulesEngineAdapter with rules.json evaluation"
+git commit -m "feat(infra): implement MicrosoftRulesEngineAdapter and add rules.json"
 ```
 
 ---
 
-### Task 7: Infrastructure In-Memory Store & Synthetic Connector with Fixtures
+### Task 7: Infrastructure Fixtures, Synthetic Connector & In-Memory Store
 
 **Files:**
 - Create: `fixtures/synthetic-employees.json`
@@ -1074,7 +1061,7 @@ git commit -m "feat(infra): implement MicrosoftRulesEngineAdapter with rules.jso
   - `SyntheticHcmConnector : IHcmConnector`
   - `InMemoryIdentityStore : IIdentityStore`
 
-- [ ] **Step 1: Create fixtures/synthetic-employees.json with the 6 canonical scenarios**
+- [ ] **Step 1: Criar catálogo de fixtures com os 6 cenários de RH**
 
 ```json
 // fixtures/synthetic-employees.json
@@ -1138,7 +1125,7 @@ git commit -m "feat(infra): implement MicrosoftRulesEngineAdapter with rules.jso
 ]
 ```
 
-- [ ] **Step 2: Write failing tests for SyntheticHcmConnector and InMemoryIdentityStore**
+- [ ] **Step 2: Escrever testes que falham para o conector e o store**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Infrastructure.Tests/Connectors/SyntheticHcmConnectorTests.cs
@@ -1207,12 +1194,12 @@ public class InMemoryIdentityStoreTests
 }
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [ ] **Step 3: Executar testes para verificar falha**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~(Synthetic|InMemory)`
-Expected: FAIL (missing types).
+Expected: FAIL.
 
-- [ ] **Step 4: Implement SyntheticHcmConnector and InMemoryIdentityStore**
+- [ ] **Step 4: Implementar SyntheticHcmConnector e InMemoryIdentityStore**
 
 ```csharp
 // src/HcmIdentityProvisioning.Infrastructure/Connectors/Synthetic/SyntheticHcmConnector.cs
@@ -1378,7 +1365,7 @@ public sealed class InMemoryIdentityStore : IIdentityStore
                     break;
 
                 case RevokeSessionsAction:
-                    // In-memory simulation: no-op state representation
+                    // Simulated in-memory: no-op
                     break;
 
                 case AddGroupMemberAction addGroup:
@@ -1405,7 +1392,7 @@ public sealed class InMemoryIdentityStore : IIdentityStore
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 5: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~(Synthetic|InMemory)`
 Expected: PASS.
@@ -1414,27 +1401,25 @@ Expected: PASS.
 
 ```bash
 git add fixtures/ src/HcmIdentityProvisioning.Infrastructure/ tests/HcmIdentityProvisioning.Infrastructure.Tests/
-git commit -m "feat(infra): add synthetic employee fixtures, SyntheticHcmConnector and thread-safe InMemoryIdentityStore"
+git commit -m "feat(infra): add synthetic employee fixtures, SyntheticHcmConnector and InMemoryIdentityStore"
 ```
 
 ---
 
-### Task 8: Infrastructure Circuit Breaker & Credential Delivery Services
+### Task 8: Infrastructure Circuit Breaker & Mock Credential Delivery
 
 **Files:**
 - Create: `src/HcmIdentityProvisioning.Infrastructure/Policies/DisablementCircuitBreaker.cs`
-- Create: `src/HcmIdentityProvisioning.Infrastructure/Notifications/EmailCredentialDeliveryService.cs`
 - Create: `src/HcmIdentityProvisioning.Infrastructure/Notifications/MockCredentialDeliveryService.cs`
 - Test: `tests/HcmIdentityProvisioning.Infrastructure.Tests/Policies/CircuitBreakerTests.cs`
 
 **Interfaces:**
-- Consumes: `ICircuitBreaker`, `ICredentialDeliveryService`, `DeltaAction`
+- Consumes: `ICircuitBreaker`, `ICredentialDeliveryService`
 - Produces:
   - `DisablementCircuitBreaker : ICircuitBreaker`
-  - `EmailCredentialDeliveryService : ICredentialDeliveryService`
   - `MockCredentialDeliveryService : ICredentialDeliveryService`
 
-- [ ] **Step 1: Write failing test for DisablementCircuitBreaker**
+- [ ] **Step 1: Escrever teste que falha para DisablementCircuitBreaker**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Infrastructure.Tests/Policies/CircuitBreakerTests.cs
@@ -1457,7 +1442,6 @@ public class CircuitBreakerTests
             new DisableAccountAction(Guid.NewGuid())
         };
 
-        // 2 disables out of 10 employees = 20% > 10%
         var tripped = breaker.ShouldTrip(totalBatchSize: 10, proposedActions: actions, out var reason);
 
         tripped.Should().BeTrue();
@@ -1473,7 +1457,6 @@ public class CircuitBreakerTests
             new DisableAccountAction(Guid.NewGuid())
         };
 
-        // 1 disable out of 50 employees = 2% < 10%
         var tripped = breaker.ShouldTrip(totalBatchSize: 50, proposedActions: actions, out _);
 
         tripped.Should().BeFalse();
@@ -1481,12 +1464,12 @@ public class CircuitBreakerTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Executar teste para verificar falha**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~CircuitBreaker`
-Expected: FAIL (missing `DisablementCircuitBreaker`).
+Expected: FAIL.
 
-- [ ] **Step 3: Implement Circuit Breaker & Credential Delivery Services**
+- [ ] **Step 3: Implementar DisablementCircuitBreaker e MockCredentialDeliveryService**
 
 ```csharp
 // src/HcmIdentityProvisioning.Infrastructure/Policies/DisablementCircuitBreaker.cs
@@ -1571,7 +1554,7 @@ public sealed class MockCredentialDeliveryService : ICredentialDeliveryService
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~CircuitBreaker`
 Expected: PASS.
@@ -1580,12 +1563,12 @@ Expected: PASS.
 
 ```bash
 git add src/HcmIdentityProvisioning.Infrastructure/ tests/HcmIdentityProvisioning.Infrastructure.Tests/
-git commit -m "feat(infra): add DisablementCircuitBreaker and CredentialDeliveryService implementations"
+git commit -m "feat(infra): add DisablementCircuitBreaker and MockCredentialDeliveryService"
 ```
 
 ---
 
-### Task 9: Application Models, Options & Reconciliation Engine
+### Task 9: Application Reconciliation Engine
 
 **Files:**
 - Create: `src/HcmIdentityProvisioning.Application/Models/ChangeSet.cs`
@@ -1595,13 +1578,10 @@ git commit -m "feat(infra): add DisablementCircuitBreaker and CredentialDelivery
 - Test: `tests/HcmIdentityProvisioning.Application.Tests/Services/IdentityReconciliationServiceTests.cs`
 
 **Interfaces:**
-- Consumes: `Domain` Entities, Ports (`IRulesEngine`, `IIdentityStore`, `ISecurePasswordGenerator`)
-- Produces:
-  - `ChangeSet`
-  - `SyncReport`
-  - `IdentityReconciliationService.ReconcileEmployee(...)`
+- Consumes: `Domain` Entities, Ports (`IRulesEngine`, `ISecurePasswordGenerator`)
+- Produces: `IdentityReconciliationService.ReconcileEmployeeAsync(...)`
 
-- [ ] **Step 1: Write failing unit test for Joiner, Mover, Leaver reconciliation logic**
+- [ ] **Step 1: Escrever testes que falham para o serviço de reconciliação**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Application.Tests/Services/IdentityReconciliationServiceTests.cs
@@ -1663,12 +1643,12 @@ public class IdentityReconciliationServiceTests
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Executar teste para verificar falha**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Application.Tests --filter FullyQualifiedName~IdentityReconciliationService`
-Expected: FAIL (missing types).
+Expected: FAIL.
 
-- [ ] **Step 3: Implement Models, Options & IdentityReconciliationService**
+- [ ] **Step 3: Implementar Models, Options e IdentityReconciliationService**
 
 ```csharp
 // src/HcmIdentityProvisioning.Application/Models/ChangeSet.cs
@@ -1758,7 +1738,7 @@ public sealed class IdentityReconciliationService
         if (existingUser is null)
         {
             if (employee.Status != EmployeeStatus.Active)
-                return actions; // Do not provision inactive joiners
+                return actions;
 
             var slug = SanitizeNameToSlug(employee.FullName);
             var upn = await ResolveAvailableUpnAsync(slug, tenantDomain, isUpnAvailable);
@@ -1774,7 +1754,7 @@ public sealed class IdentityReconciliationService
                 }
                 else
                 {
-                    onWarning?.Invoke($"WARNING_MANAGED_GROUP_NOT_FOUND: Group '{groupName}' required by rules was not found in directory.");
+                    onWarning?.Invoke($"WARNING_MANAGED_GROUP_NOT_FOUND: Group '{groupName}' was not found in directory.");
                 }
             }
 
@@ -1790,7 +1770,6 @@ public sealed class IdentityReconciliationService
                 actions.Add(new RevokeSessionsAction(existingUser.GraphId));
             }
 
-            // Purge only managed groups
             foreach (var managedGroup in managedGroups.Values)
             {
                 if (existingUser.AssignedGroupIds.Contains(managedGroup.Id))
@@ -1813,7 +1792,6 @@ public sealed class IdentityReconciliationService
             actions.Add(new UpdateDisplayNameAction(existingUser.GraphId, employee.FullName));
         }
 
-        // Group Delta (restricted to managed groups boundary)
         foreach (var groupName in desiredGroups)
         {
             if (managedGroups.TryGetValue(groupName, out var group))
@@ -1825,7 +1803,7 @@ public sealed class IdentityReconciliationService
             }
             else
             {
-                onWarning?.Invoke($"WARNING_MANAGED_GROUP_NOT_FOUND: Group '{groupName}' required by rules was not found in directory.");
+                onWarning?.Invoke($"WARNING_MANAGED_GROUP_NOT_FOUND: Group '{groupName}' was not found in directory.");
             }
         }
 
@@ -1880,7 +1858,7 @@ public sealed class IdentityReconciliationService
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Application.Tests --filter FullyQualifiedName~IdentityReconciliationService`
 Expected: PASS.
@@ -1889,12 +1867,12 @@ Expected: PASS.
 
 ```bash
 git add src/HcmIdentityProvisioning.Application/ tests/HcmIdentityProvisioning.Application.Tests/
-git commit -m "feat(application): add Models, SyncSettings and IdentityReconciliationService"
+git commit -m "feat(application): implement IdentityReconciliationService with joiner, mover and leaver logic"
 ```
 
 ---
 
-### Task 10: Application Use Cases (ReconcileBatchUseCase & DryRunAuditUseCase)
+### Task 10: Application Orchestration Use Cases (ReconcileBatchUseCase & DryRunAuditUseCase)
 
 **Files:**
 - Create: `src/HcmIdentityProvisioning.Application/UseCases/ReconcileBatchUseCase.cs`
@@ -1902,12 +1880,12 @@ git commit -m "feat(application): add Models, SyncSettings and IdentityReconcili
 - Test: `tests/HcmIdentityProvisioning.Application.Tests/UseCases/ReconcileBatchUseCaseTests.cs`
 
 **Interfaces:**
-- Consumes: `IHcmConnector`, `IIdentityStore`, `IdentityReconciliationService`, `ICircuitBreaker`, `ICredentialDeliveryService`, `SyncSettings`
+- Consumes: `IHcmConnector`, `IIdentityStore`, `IdentityReconciliationService`, `ICircuitBreaker`, `ICredentialDeliveryService`
 - Produces:
-  - `ReconcileBatchUseCase.ExecuteAsync(ct)` -> `SyncReport`
-  - `DryRunAuditUseCase.ExecuteAsync(ct)` -> `SyncReport` (no store mutation)
+  - `ReconcileBatchUseCase.ExecuteAsync()`
+  - `DryRunAuditUseCase.ExecuteAsync()`
 
-- [ ] **Step 1: Write failing test for ReconcileBatchUseCase with Circuit Breaker trip**
+- [ ] **Step 1: Escrever teste de circuito aberto para ReconcileBatchUseCase**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Application.Tests/UseCases/ReconcileBatchUseCaseTests.cs
@@ -1966,18 +1944,18 @@ public class ReconcileBatchUseCaseTests
         var report = await useCase.ExecuteAsync();
 
         report.CircuitBreakerTripped.Should().BeTrue();
-        report.DisabledCount.Should().Be(0); // Destructive action was suppressed
+        report.DisabledCount.Should().Be(0);
         await store.DidNotReceive().ApplyBatchMutationsAsync(Arg.Any<IEnumerable<Domain.Actions.DeltaAction>>(), Arg.Any<CancellationToken>());
     }
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Executar teste para verificar falha**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Application.Tests --filter FullyQualifiedName~ReconcileBatchUseCase`
-Expected: FAIL (missing types).
+Expected: FAIL.
 
-- [ ] **Step 3: Implement ReconcileBatchUseCase and DryRunAuditUseCase**
+- [ ] **Step 3: Implementar ReconcileBatchUseCase e DryRunAuditUseCase**
 
 ```csharp
 // src/HcmIdentityProvisioning.Application/UseCases/ReconcileBatchUseCase.cs
@@ -2054,7 +2032,6 @@ public sealed class ReconcileBatchUseCase
                 batchActions.AddRange(actions);
             }
 
-            // Circuit Breaker Evaluation
             if (_circuitBreaker.ShouldTrip(paged.Items.Count, batchActions, out var reason))
             {
                 tripped = true;
@@ -2066,11 +2043,9 @@ public sealed class ReconcileBatchUseCase
                     break;
                 }
 
-                // Halt destructive actions only
                 batchActions.RemoveAll(a => a is DisableAccountAction or RevokeSessionsAction);
             }
 
-            // Apply mutations
             if (batchActions.Count > 0)
             {
                 await _identityStore.ApplyBatchMutationsAsync(batchActions, ct);
@@ -2209,7 +2184,7 @@ public sealed class DryRunAuditUseCase
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Executar testes para verificar aprovação**
 
 Run: `dotnet test tests/HcmIdentityProvisioning.Application.Tests --filter FullyQualifiedName~ReconcileBatchUseCase`
 Expected: PASS.
@@ -2223,274 +2198,35 @@ git commit -m "feat(application): implement ReconcileBatchUseCase and DryRunAudi
 
 ---
 
-### Task 11: Infrastructure Production Adapters & DI Extensions
+### Task 11: CLI Console Application (System.CommandLine, Commands & DI Sandbox)
 
 **Files:**
-- Create: `src/HcmIdentityProvisioning.Infrastructure/Connectors/Rest/GenericRestHcmConnector.cs`
-- Create: `src/HcmIdentityProvisioning.Infrastructure/Graph/EntraIdGraphAdapter.cs`
 - Create: `src/HcmIdentityProvisioning.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs`
-- Test: `tests/HcmIdentityProvisioning.Infrastructure.Tests/DependencyInjection/ServiceRegistrationTests.cs`
+- Create: `src/HcmIdentityProvisioning.Cli/Commands/SyncCommand.cs`
+- Create: `src/HcmIdentityProvisioning.Cli/Commands/ValidateRulesCommand.cs`
+- Create: `src/HcmIdentityProvisioning.Cli/Program.cs`
 
 **Interfaces:**
-- Consumes: `Microsoft.Graph` v5, `Azure.Identity`, `IHttpClientFactory`
-- Produces:
-  - `GenericRestHcmConnector : IHcmConnector`
-  - `EntraIdGraphAdapter : IIdentityStore`
-  - `ServiceCollectionExtensions` (`AddSyntheticHcmConnector`, `AddGenericRestHcmConnector`, `AddInMemoryIdentityStore`, `AddEntraIdGraphAdapter`, `AddHcmProvisioningCore`)
+- Consumes: `System.CommandLine`, `ReconcileBatchUseCase`, `DryRunAuditUseCase`, `SyntheticHcmConnector`, `InMemoryIdentityStore`
+- Produces: Binário executável do CLI (`hcm-sync`) com comandos `sync` e `validate-rules`.
 
-- [ ] **Step 1: Add Microsoft.Graph, Azure.Identity and Microsoft.Extensions.Http to Infrastructure**
+- [ ] **Step 1: Adicionar System.CommandLine e extensões de DI**
 
 ```powershell
-dotnet add src/HcmIdentityProvisioning.Infrastructure package Microsoft.Graph --version 5.75.0
-dotnet add src/HcmIdentityProvisioning.Infrastructure package Azure.Identity --version 1.13.2
-dotnet add src/HcmIdentityProvisioning.Infrastructure package Microsoft.Extensions.Http --version 10.0.0-preview.1.25080.5
 dotnet add src/HcmIdentityProvisioning.Infrastructure package Microsoft.Extensions.DependencyInjection.Abstractions --version 10.0.0-preview.1.25080.5
+dotnet add src/HcmIdentityProvisioning.Cli package System.CommandLine --version 2.0.0-beta4.22272.1
+dotnet add src/HcmIdentityProvisioning.Cli package Microsoft.Extensions.Logging.Console --version 10.0.0-preview.1.25080.5
 ```
 
-- [ ] **Step 2: Implement GenericRestHcmConnector**
-
-```csharp
-// src/HcmIdentityProvisioning.Infrastructure/Connectors/Rest/GenericRestHcmConnector.cs
-using System.Net.Http.Json;
-using HcmIdentityProvisioning.Domain.Common;
-using HcmIdentityProvisioning.Domain.Entities;
-using HcmIdentityProvisioning.Domain.Ports;
-
-namespace HcmIdentityProvisioning.Infrastructure.Connectors.Rest;
-
-public sealed class GenericRestHcmConnector : IHcmConnector
-{
-    private readonly HttpClient _httpClient;
-
-    public GenericRestHcmConnector(HttpClient httpClient)
-    {
-        _httpClient = httpClient;
-    }
-
-    public async Task<PagedResult<Employee>> GetEmployeesPageAsync(int pageNumber, int pageSize, CancellationToken ct = default)
-    {
-        var url = $"/api/employees?page={pageNumber}&pageSize={pageSize}";
-        var response = await _httpClient.GetFromJsonAsync<PagedResultDto>(url, ct);
-
-        if (response is null)
-        {
-            return new PagedResult<Employee>(Array.Empty<Employee>(), pageNumber, pageSize, 0, false);
-        }
-
-        var domainItems = response.Items.Select(i => i.ToDomain()).ToList();
-        return new PagedResult<Employee>(domainItems, pageNumber, pageSize, response.TotalCount, response.HasNextPage);
-    }
-
-    public sealed record PagedResultDto(List<EmployeeDto> Items, int TotalCount, bool HasNextPage);
-    public sealed record EmployeeDto(string Id, string FullName, string Status, string Department, string JobTitle, Dictionary<string, string>? ExtendedAttributes)
-    {
-        public Employee ToDomain() => new(
-            Domain.ValueObjects.EmployeeId.Create(Id).Value,
-            FullName,
-            Enum.Parse<Domain.Enums.EmployeeStatus>(Status, true),
-            Department,
-            JobTitle,
-            ExtendedAttributes ?? new Dictionary<string, string>()
-        );
-    }
-}
-```
-
-- [ ] **Step 3: Implement EntraIdGraphAdapter**
-
-```csharp
-// src/HcmIdentityProvisioning.Infrastructure/Graph/EntraIdGraphAdapter.cs
-using HcmIdentityProvisioning.Domain.Actions;
-using HcmIdentityProvisioning.Domain.Entities;
-using HcmIdentityProvisioning.Domain.Ports;
-using HcmIdentityProvisioning.Domain.ValueObjects;
-using Microsoft.Graph;
-using Microsoft.Graph.Models;
-using Microsoft.Extensions.Logging;
-
-namespace HcmIdentityProvisioning.Infrastructure.Graph;
-
-public sealed class EntraIdGraphAdapter : IIdentityStore
-{
-    private readonly GraphServiceClient _graphClient;
-    private readonly string _managedGroupPrefix;
-    private readonly ILogger<EntraIdGraphAdapter> _logger;
-
-    public EntraIdGraphAdapter(
-        GraphServiceClient graphClient,
-        string managedGroupPrefix,
-        ILogger<EntraIdGraphAdapter> logger)
-    {
-        _graphClient = graphClient;
-        _managedGroupPrefix = managedGroupPrefix;
-        _logger = logger;
-    }
-
-    public async Task<IReadOnlyDictionary<EmployeeId, EntraUser>> GetUsersByEmployeeIdsAsync(
-        IEnumerable<EmployeeId> employeeIds,
-        CancellationToken ct = default)
-    {
-        var result = new Dictionary<EmployeeId, EntraUser>();
-        var idList = employeeIds.ToList();
-        if (idList.Count == 0) return result;
-
-        // In Microsoft Graph, we query users by employeeId
-        // Batch query or filter using $filter
-        var filter = string.Join(" or ", idList.Select(e => $"employeeId eq '{e.Value}'"));
-        var usersResponse = await _graphClient.Users.GetAsync(rc =>
-        {
-            rc.QueryParameters.Filter = filter;
-            rc.QueryParameters.Select = new[] { "id", "employeeId", "userPrincipalName", "displayName", "accountEnabled" };
-        }, ct);
-
-        if (usersResponse?.Value is not null)
-        {
-            foreach (var user in usersResponse.Value)
-            {
-                if (Guid.TryParse(user.Id, out var graphGuid) &&
-                    !string.IsNullOrWhiteSpace(user.EmployeeId) &&
-                    !string.IsNullOrWhiteSpace(user.UserPrincipalName))
-                {
-                    var empId = EmployeeId.Create(user.EmployeeId).Value;
-                    var upn = UserPrincipalName.Create(user.UserPrincipalName).Value;
-
-                    // Fetch user's member groups
-                    var memberGroups = await _graphClient.Users[user.Id].GetMemberGroups.PostAsGetMemberGroupsPostResponseAsync(new()
-                    {
-                        SecurityEnabledOnly = true
-                    }, cancellationToken: ct);
-
-                    var groupGuids = (memberGroups?.Value ?? Enumerable.Empty<string>())
-                        .Select(g => Guid.TryParse(g, out var gid) ? gid : Guid.Empty)
-                        .Where(g => g != Guid.Empty)
-                        .ToHashSet();
-
-                    result[empId] = new EntraUser(
-                        graphGuid,
-                        empId,
-                        upn,
-                        user.DisplayName ?? string.Empty,
-                        user.AccountEnabled ?? true,
-                        groupGuids
-                    );
-                }
-            }
-        }
-
-        return result;
-    }
-
-    public async Task<bool> IsUserPrincipalNameAvailableAsync(UserPrincipalName upn, CancellationToken ct = default)
-    {
-        var response = await _graphClient.Users.GetAsync(rc =>
-        {
-            rc.QueryParameters.Filter = $"userPrincipalName eq '{upn.Value}'";
-            rc.QueryParameters.Select = new[] { "id" };
-        }, ct);
-
-        return response?.Value is null || response.Value.Count == 0;
-    }
-
-    public async Task<IReadOnlyDictionary<string, ManagedGroup>> GetManagedGroupsAsync(CancellationToken ct = default)
-    {
-        var dict = new Dictionary<string, ManagedGroup>(StringComparer.OrdinalIgnoreCase);
-        var groupsResponse = await _graphClient.Groups.GetAsync(rc =>
-        {
-            rc.QueryParameters.Filter = $"startswith(displayName, '{_managedGroupPrefix}')";
-            rc.QueryParameters.Select = new[] { "id", "displayName" };
-        }, ct);
-
-        if (groupsResponse?.Value is not null)
-        {
-            foreach (var g in groupsResponse.Value)
-            {
-                if (Guid.TryParse(g.Id, out var gid) && !string.IsNullOrWhiteSpace(g.DisplayName))
-                {
-                    dict[g.DisplayName] = new ManagedGroup(gid, g.DisplayName);
-                }
-            }
-        }
-
-        return dict;
-    }
-
-    public async Task ApplyBatchMutationsAsync(IEnumerable<DeltaAction> actions, CancellationToken ct = default)
-    {
-        // Batch processing up to 20 operations per Graph Batch API payload
-        foreach (var action in actions)
-        {
-            switch (action)
-            {
-                case CreateUserAction create:
-                    var newUser = new User
-                    {
-                        AccountEnabled = true,
-                        DisplayName = create.Employee.FullName,
-                        UserPrincipalName = create.UserPrincipalName.Value,
-                        EmployeeId = create.Employee.Id.Value,
-                        MailNickname = create.UserPrincipalName.Username,
-                        PasswordProfile = new PasswordProfile
-                        {
-                            ForceChangePasswordNextSignIn = true,
-                            Password = create.TemporaryPassword
-                        }
-                    };
-                    await _graphClient.Users.PostAsync(newUser, cancellationToken: ct);
-                    break;
-
-                case UpdateDisplayNameAction updateName:
-                    await _graphClient.Users[updateName.GraphId.ToString()].PatchAsync(new User
-                    {
-                        DisplayName = updateName.NewDisplayName
-                    }, cancellationToken: ct);
-                    break;
-
-                case EnableAccountAction enable:
-                    await _graphClient.Users[enable.GraphId.ToString()].PatchAsync(new User
-                    {
-                        AccountEnabled = true
-                    }, cancellationToken: ct);
-                    break;
-
-                case DisableAccountAction disable:
-                    await _graphClient.Users[disable.GraphId.ToString()].PatchAsync(new User
-                    {
-                        AccountEnabled = false
-                    }, cancellationToken: ct);
-                    break;
-
-                case RevokeSessionsAction revoke:
-                    await _graphClient.Users[revoke.GraphId.ToString()].RevokeSignInSessions.PostAsRevokeSignInSessionsPostResponseAsync(cancellationToken: ct);
-                    break;
-
-                case AddGroupMemberAction addGroup:
-                    var requestBody = new ReferenceCreate
-                    {
-                        OdataId = $"https://graph.microsoft.com/v1.0/directoryObjects/{addGroup.GraphId}"
-                    };
-                    await _graphClient.Groups[addGroup.GroupId.ToString()].Members.Ref.PostAsync(requestBody, cancellationToken: ct);
-                    break;
-
-                case RemoveGroupMemberAction removeGroup:
-                    await _graphClient.Groups[removeGroup.GroupId.ToString()].Members[removeGroup.GraphId.ToString()].Ref.DeleteAsync(cancellationToken: ct);
-                    break;
-            }
-        }
-    }
-}
-```
-
-- [ ] **Step 4: Implement ServiceCollectionExtensions**
+- [ ] **Step 2: Implementar ServiceCollectionExtensions em Infrastructure**
 
 ```csharp
 // src/HcmIdentityProvisioning.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs
-using Azure.Identity;
 using HcmIdentityProvisioning.Application.Options;
 using HcmIdentityProvisioning.Application.Services;
 using HcmIdentityProvisioning.Application.UseCases;
 using HcmIdentityProvisioning.Domain.Policies;
 using HcmIdentityProvisioning.Domain.Ports;
-using HcmIdentityProvisioning.Infrastructure.Connectors.Rest;
 using HcmIdentityProvisioning.Infrastructure.Connectors.Synthetic;
 using HcmIdentityProvisioning.Infrastructure.Graph;
 using HcmIdentityProvisioning.Infrastructure.Notifications;
@@ -2498,8 +2234,6 @@ using HcmIdentityProvisioning.Infrastructure.Policies;
 using HcmIdentityProvisioning.Infrastructure.Rules;
 using HcmIdentityProvisioning.Infrastructure.Security;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Graph;
 
 namespace HcmIdentityProvisioning.Infrastructure.DependencyInjection;
 
@@ -2529,14 +2263,6 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddGenericRestHcmConnector(
-        this IServiceCollection services,
-        Action<HttpClient> configureClient)
-    {
-        services.AddHttpClient<IHcmConnector, GenericRestHcmConnector>(configureClient);
-        return services;
-    }
-
     public static IServiceCollection AddInMemoryIdentityStore(
         this IServiceCollection services,
         Action<InMemoryIdentityStore>? seedAction = null)
@@ -2547,94 +2273,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICredentialDeliveryService, MockCredentialDeliveryService>();
         return services;
     }
-
-    public static IServiceCollection AddEntraIdGraphAdapter(
-        this IServiceCollection services,
-        string tenantId,
-        string clientId,
-        string managedGroupPrefix)
-    {
-        services.AddSingleton<IIdentityStore>(sp =>
-        {
-            var logger = sp.GetRequiredService<ILogger<EntraIdGraphAdapter>>();
-            var credential = new DefaultAzureCredential();
-            var client = new GraphServiceClient(credential, new[] { "https://graph.microsoft.com/.default" });
-            return new EntraIdGraphAdapter(client, managedGroupPrefix, logger);
-        });
-
-        services.AddSingleton<ICredentialDeliveryService, MockCredentialDeliveryService>();
-        return services;
-    }
 }
 ```
 
-- [ ] **Step 5: Write registration test and verify compilation**
-
-```csharp
-// tests/HcmIdentityProvisioning.Infrastructure.Tests/DependencyInjection/ServiceRegistrationTests.cs
-using FluentAssertions;
-using HcmIdentityProvisioning.Application.Options;
-using HcmIdentityProvisioning.Domain.Ports;
-using HcmIdentityProvisioning.Infrastructure.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Xunit;
-
-namespace HcmIdentityProvisioning.Infrastructure.Tests.DependencyInjection;
-
-public class ServiceRegistrationTests
-{
-    [Fact]
-    public void AddSyntheticAndInMemory_RegistersAllRequiredServices()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddHcmProvisioningCore(new SyncSettings(), "src/HcmIdentityProvisioning.Infrastructure/Rules/rules.json");
-        services.AddSyntheticHcmConnector("fixtures/synthetic-employees.json");
-        services.AddInMemoryIdentityStore();
-
-        var sp = services.BuildServiceProvider();
-
-        sp.GetService<IHcmConnector>().Should().NotBeNull();
-        sp.GetService<IIdentityStore>().Should().NotBeNull();
-        sp.GetService<IRulesEngine>().Should().NotBeNull();
-    }
-}
-```
-
-- [ ] **Step 6: Run tests to verify they pass**
-
-Run: `dotnet test tests/HcmIdentityProvisioning.Infrastructure.Tests --filter FullyQualifiedName~ServiceRegistrationTests`
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/HcmIdentityProvisioning.Infrastructure/ tests/HcmIdentityProvisioning.Infrastructure.Tests/
-git commit -m "feat(infra): implement GenericRestHcmConnector, EntraIdGraphAdapter and DI extension methods"
-```
-
----
-
-### Task 12: CLI Console Application (System.CommandLine, Commands, Formatting & Execution)
-
-**Files:**
-- Create: `src/HcmIdentityProvisioning.Cli/Commands/SyncCommand.cs`
-- Create: `src/HcmIdentityProvisioning.Cli/Commands/ValidateRulesCommand.cs`
-- Create: `src/HcmIdentityProvisioning.Cli/Program.cs`
-- Test: `tests/HcmIdentityProvisioning.Infrastructure.Tests/Cli/CliExecutionTests.cs`
-
-**Interfaces:**
-- Consumes: `System.CommandLine`, `HcmProvisioningCore`, `SyntheticHcmConnector`, `InMemoryIdentityStore`
-- Produces: Executable CLI tool supporting `sync` (`--dry-run`, `--json-logs`) and `validate-rules` commands.
-
-- [ ] **Step 1: Add System.CommandLine package to CLI project**
-
-```powershell
-dotnet add src/HcmIdentityProvisioning.Cli package System.CommandLine --version 2.0.0-beta4.22272.1
-```
-
-- [ ] **Step 2: Implement SyncCommand and ValidateRulesCommand**
+- [ ] **Step 3: Implementar comandos do CLI e Program.cs**
 
 ```csharp
 // src/HcmIdentityProvisioning.Cli/Commands/ValidateRulesCommand.cs
@@ -2809,7 +2451,6 @@ var settings = new SyncSettings
     ManagedGroupPrefix = "grp-iam-"
 };
 
-// CLI defaults to self-contained Synthetic sandbox for offline evaluation
 var rulesPath = Path.Combine(AppContext.BaseDirectory, "rules.json");
 if (!File.Exists(rulesPath))
 {
@@ -2836,231 +2477,30 @@ rootCommand.AddCommand(ValidateRulesCommand.Create());
 return await rootCommand.InvokeAsync(args);
 ```
 
-- [ ] **Step 3: Test CLI build and execution**
+- [ ] **Step 4: Executar CLI em modo audit / dry-run**
 
 Run: `dotnet run --project src/HcmIdentityProvisioning.Cli -- sync --dry-run`
-Expected: Outputs formatted table showing 6 processed employees, joiners created, and groups assigned.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/HcmIdentityProvisioning.Cli/
-git commit -m "feat(cli): implement System.CommandLine entrypoint with sync and validate-rules commands"
-```
-
----
-
-### Task 13: Azure Functions .NET Isolated Worker (Timer Trigger & HTTP Webhook)
-
-**Files:**
-- Create: `src/HcmIdentityProvisioning.Functions/host.json`
-- Create: `src/HcmIdentityProvisioning.Functions/local.settings.json`
-- Create: `src/HcmIdentityProvisioning.Functions/Functions/SyncTimerFunction.cs`
-- Create: `src/HcmIdentityProvisioning.Functions/Functions/SyncHttpFunction.cs`
-- Create: `src/HcmIdentityProvisioning.Functions/Program.cs`
-- Modify: `src/HcmIdentityProvisioning.Functions/HcmIdentityProvisioning.Functions.csproj`
-
-**Interfaces:**
-- Consumes: `Microsoft.Azure.Functions.Worker`, `ReconcileBatchUseCase`, `DryRunAuditUseCase`
-- Produces: Scheduled CRON trigger and authenticated HTTP endpoint.
-
-- [ ] **Step 1: Configure project packages and host.json**
-
-```powershell
-dotnet add src/HcmIdentityProvisioning.Functions package Microsoft.Azure.Functions.Worker --version 2.0.0
-dotnet add src/HcmIdentityProvisioning.Functions package Microsoft.Azure.Functions.Worker.Sdk --version 2.0.0
-dotnet add src/HcmIdentityProvisioning.Functions package Microsoft.Azure.Functions.Worker.Extensions.Timer --version 4.3.1
-dotnet add src/HcmIdentityProvisioning.Functions package Microsoft.Azure.Functions.Worker.Extensions.Http --version 3.2.0
-dotnet add src/HcmIdentityProvisioning.Functions package Microsoft.ApplicationInsights.WorkerService --version 2.22.0
-```
-
-Update `HcmIdentityProvisioning.Functions.csproj`:
-Ensure `<OutputType>Exe</OutputType>` is set.
-
-```json
-// src/HcmIdentityProvisioning.Functions/host.json
-{
-  "version": "2.0",
-  "logging": {
-    "applicationInsights": {
-      "samplingSettings": {
-        "isEnabled": true,
-        "excludedTypes": "Request"
-      }
-    }
-  }
-}
-```
-
-```json
-// src/HcmIdentityProvisioning.Functions/local.settings.json
-{
-  "IsEncrypted": false,
-  "Values": {
-    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "TenantDomain": "company.onmicrosoft.com",
-    "ManagedGroupPrefix": "grp-iam-"
-  }
-}
-```
-
-- [ ] **Step 2: Implement SyncTimerFunction and SyncHttpFunction**
-
-```csharp
-// src/HcmIdentityProvisioning.Functions/Functions/SyncTimerFunction.cs
-using HcmIdentityProvisioning.Application.UseCases;
-using Microsoft.Azure.Functions.Worker;
-using Microsoft.Extensions.Logging;
-
-namespace HcmIdentityProvisioning.Functions.Functions;
-
-public sealed class SyncTimerFunction
-{
-    private readonly ReconcileBatchUseCase _reconcileUseCase;
-    private readonly ILogger<SyncTimerFunction> _logger;
-
-    public SyncTimerFunction(ReconcileBatchUseCase reconcileUseCase, ILogger<SyncTimerFunction> logger)
-    {
-        _reconcileUseCase = reconcileUseCase;
-        _logger = logger;
-    }
-
-    [Function("SyncTimerFunction")]
-    public async Task Run([TimerTrigger("0 */30 * * * *")] TimerInfo myTimer)
-    {
-        _logger.LogInformation("Scheduled IAM reconciliation started at: {Time}", DateTime.UtcNow);
-        var report = await _reconcileUseCase.ExecuteAsync();
-        _logger.LogInformation("Reconciliation finished: Processed {Count}, Created {Created}, Disabled {Disabled}",
-            report.TotalProcessed, report.CreatedCount, report.DisabledCount);
-    }
-}
-```
-
-```csharp
-// src/HcmIdentityProvisioning.Functions/Functions/SyncHttpFunction.cs
-using System.Net;
-using HcmIdentityProvisioning.Application.UseCases;
-using Microsoft.Azure.Functions.Worker;
-using Microsoft.Azure.Functions.Worker.Http;
-using Microsoft.Extensions.Logging;
-
-namespace HcmIdentityProvisioning.Functions.Functions;
-
-public sealed class SyncHttpFunction
-{
-    private readonly ReconcileBatchUseCase _reconcileUseCase;
-    private readonly DryRunAuditUseCase _dryRunUseCase;
-    private readonly ILogger<SyncHttpFunction> _logger;
-
-    public SyncHttpFunction(
-        ReconcileBatchUseCase reconcileUseCase,
-        DryRunAuditUseCase dryRunUseCase,
-        ILogger<SyncHttpFunction> logger)
-    {
-        _reconcileUseCase = reconcileUseCase;
-        _dryRunUseCase = dryRunUseCase;
-        _logger = logger;
-    }
-
-    [Function("SyncHttpFunction")]
-    public async Task<HttpResponseData> Run(
-        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "sync")] HttpRequestData req)
-    {
-        _logger.LogInformation("Manual / Webhook IAM sync requested.");
-        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-        bool isDryRun = bool.TryParse(query["dry_run"], out var dry) && dry;
-
-        var report = isDryRun
-            ? await _dryRunUseCase.ExecuteAsync()
-            : await _reconcileUseCase.ExecuteAsync();
-
-        var response = req.CreateResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(report);
-        return response;
-    }
-}
-```
-
-- [ ] **Step 3: Implement Program.cs for Functions with Production Composition**
-
-```csharp
-// src/HcmIdentityProvisioning.Functions/Program.cs
-using HcmIdentityProvisioning.Application.Options;
-using HcmIdentityProvisioning.Infrastructure.DependencyInjection;
-using Microsoft.Azure.Functions.Worker.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-
-var builder = FunctionsApplication.CreateBuilder(args);
-
-builder.ConfigureFunctionsWebApplication();
-
-var settings = new SyncSettings
-{
-    TenantDomain = Environment.GetEnvironmentVariable("TenantDomain") ?? "company.onmicrosoft.com",
-    ManagedGroupPrefix = Environment.GetEnvironmentVariable("ManagedGroupPrefix") ?? "grp-iam-"
-};
-
-var rulesPath = Path.Combine(AppContext.BaseDirectory, "rules.json");
-if (!File.Exists(rulesPath))
-{
-    rulesPath = "rules.json";
-}
-
-builder.Services.AddHcmProvisioningCore(settings, rulesPath);
-
-// Register Production Connectors
-var hcmApiBaseUrl = Environment.GetEnvironmentVariable("HcmApiBaseUrl");
-if (!string.IsNullOrWhiteSpace(hcmApiBaseUrl))
-{
-    builder.Services.AddGenericRestHcmConnector(client => client.BaseAddress = new Uri(hcmApiBaseUrl));
-}
-else
-{
-    // Fallback to synthetic if unconfigured in local dev
-    builder.Services.AddSyntheticHcmConnector("fixtures/synthetic-employees.json");
-}
-
-var tenantId = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
-var clientId = Environment.GetEnvironmentVariable("AZURE_CLIENT_ID");
-
-if (!string.IsNullOrWhiteSpace(tenantId) && !string.IsNullOrWhiteSpace(clientId))
-{
-    builder.Services.AddEntraIdGraphAdapter(tenantId, clientId, settings.ManagedGroupPrefix);
-}
-else
-{
-    builder.Services.AddInMemoryIdentityStore();
-}
-
-builder.Build().Run();
-```
-
-- [ ] **Step 4: Verify Functions project compiles cleanly**
-
-Run: `dotnet build src/HcmIdentityProvisioning.Functions`
-Expected: `Build succeeded. 0 Warning(s) 0 Error(s)`
+Expected: Saída visual com relatório exibindo 6 colaboradores processados, joiners contabilizados e zero erros.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/HcmIdentityProvisioning.Functions/
-git commit -m "feat(functions): implement Azure Functions .NET Isolated Worker with timer and http triggers"
+git add src/HcmIdentityProvisioning.Infrastructure/ src/HcmIdentityProvisioning.Cli/
+git commit -m "feat(cli): implement CLI sandbox runner with sync, dry-run, json-logs and validate-rules"
 ```
 
 ---
 
-### Task 14: End-to-End Integration Tests & Verification
+### Task 12: Cycle 1 End-to-End Verification (6 Scenarios & Idempotency)
 
 **Files:**
 - Create: `tests/HcmIdentityProvisioning.Infrastructure.Tests/EndToEnd/FullLifecycleIntegrationTests.cs`
 
 **Interfaces:**
-- Consumes: All components assembled
-- Produces: Automated E2E verification of Joiner, Mover, Leaver, Homonym, Diacritics and Idempotency in < 1 second.
+- Consumes: Todos os componentes do Ciclo 1 montados
+- Produces: Teste de integração ponta a ponta verificando Joiner, Mover, Leaver, Colisão, Diacríticos, Idempotência e execução sub-segundo (< 1s).
 
-- [ ] **Step 1: Write FullLifecycleIntegrationTests covering the 6 scenarios**
+- [ ] **Step 1: Escrever teste de integração de ponta a ponta**
 
 ```csharp
 // tests/HcmIdentityProvisioning.Infrastructure.Tests/EndToEnd/FullLifecycleIntegrationTests.cs
@@ -3098,19 +2538,19 @@ public class FullLifecycleIntegrationTests
         store.SeedGroup(finGroup, "grp-iam-finance");
         store.SeedGroup(allStaffGroup, "grp-iam-all-staff");
 
-        // Seed an existing employee that will undergo Mover scenario
-        var existingUser = new EntraUser(
+        // Seed Mover (EMP-002 Rodrigo Alves in engineering -> will move to finance)
+        var existingMover = new EntraUser(
             Guid.NewGuid(),
             EmployeeId.Create("EMP-002").Value,
             UserPrincipalName.Create("rodrigo.alves@company.onmicrosoft.com").Value,
             "Rodrigo Alves",
             true,
-            new HashSet<Guid> { engGroup } // currently in engineering, rules say he belongs to finance
+            new HashSet<Guid> { engGroup }
         );
-        store.SeedUser(existingUser);
+        store.SeedUser(existingMover);
 
-        // Seed an existing employee that will undergo Leaver scenario (EMP-003 is Inactive)
-        var leaverUser = new EntraUser(
+        // Seed Leaver (EMP-003 Beatriz Souza is inactive -> will be disabled)
+        var existingLeaver = new EntraUser(
             Guid.NewGuid(),
             EmployeeId.Create("EMP-003").Value,
             UserPrincipalName.Create("beatriz.souza@company.onmicrosoft.com").Value,
@@ -3118,7 +2558,7 @@ public class FullLifecycleIntegrationTests
             true,
             new HashSet<Guid> { allStaffGroup }
         );
-        store.SeedUser(leaverUser);
+        store.SeedUser(existingLeaver);
 
         var connector = SyntheticHcmConnector.FromFixturesFile("fixtures/synthetic-employees.json");
         var rules = MicrosoftRulesEngineAdapter.FromFile("src/HcmIdentityProvisioning.Infrastructure/Rules/rules.json");
@@ -3146,24 +2586,24 @@ public class FullLifecycleIntegrationTests
         var firstReport = await useCase.ExecuteAsync();
         sw.Stop();
 
-        // 1. Performance check (< 1000ms)
+        // 1. Desempenho sub-segundo (< 1000ms)
         sw.ElapsedMilliseconds.Should().BeLessThan(1000);
 
-        // 2. Functional mutations check
+        // 2. Validações funcionais
         firstReport.TotalProcessed.Should().Be(6);
-        firstReport.CreatedCount.Should().BeGreaterThan(0); // Joiners created
-        firstReport.DisabledCount.Should().Be(1); // Beatriz Souza disabled
+        firstReport.CreatedCount.Should().BeGreaterThan(0);
+        firstReport.DisabledCount.Should().Be(1); // Beatriz desabilitada
         firstReport.SessionsRevokedCount.Should().Be(1);
 
-        // Verify homonym collision resolution (EMP-004 should get mariana.lima2@company.onmicrosoft.com)
+        // Homônimo resolvido
         var users = await store.GetUsersByEmployeeIdsAsync(new[] { EmployeeId.Create("EMP-004").Value });
         users[EmployeeId.Create("EMP-004").Value].UserPrincipalName.Value.Should().Be("mariana.lima2@company.onmicrosoft.com");
 
-        // Verify diacritic stripping (EMP-005 "José d'Ávila" -> jose.davila)
+        // Diacrítico tratado (José d'Ávila -> jose.davila)
         var joseUsers = await store.GetUsersByEmployeeIdsAsync(new[] { EmployeeId.Create("EMP-005").Value });
         joseUsers[EmployeeId.Create("EMP-005").Value].UserPrincipalName.Value.Should().Be("jose.davila@company.onmicrosoft.com");
 
-        // 3. IDEMPOTENCY CHECK: Running cycle immediately again must produce 0 mutations
+        // 3. IDEMPOTÊNCIA: Segunda execução consecutiva produz ZERO mutações
         var secondReport = await useCase.ExecuteAsync();
         secondReport.CreatedCount.Should().Be(0);
         secondReport.UpdatedCount.Should().Be(0);
@@ -3175,10 +2615,10 @@ public class FullLifecycleIntegrationTests
 }
 ```
 
-- [ ] **Step 2: Run all tests in the solution**
+- [ ] **Step 2: Executar todos os testes da solução**
 
 Run: `dotnet test`
-Expected: `Passed! - Failed: 0, Passed: >15, Skipped: 0`
+Expected: `Passed! - Failed: 0, Passed: >12, Skipped: 0`
 
 - [ ] **Step 3: Commit**
 
