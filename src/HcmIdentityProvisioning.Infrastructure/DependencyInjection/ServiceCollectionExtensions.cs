@@ -167,7 +167,16 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<GraphEmailCredentialDeliveryService>(sp =>
         {
-            var graphClient = sp.GetRequiredService<GraphServiceClient>();
+            var graphClient = sp.GetService<GraphServiceClient>()
+                ?? sp.GetService<EntraIdGraphAdapter>()?.GraphClient;
+
+            if (graphClient == null)
+            {
+                var entraOptions = sp.GetService<IOptions<EntraIdGraphOptions>>()?.Value;
+                var credential = entraOptions?.CustomCredential ?? new Azure.Identity.DefaultAzureCredential();
+                graphClient = new GraphServiceClient(credential);
+            }
+
             var options = sp.GetRequiredService<IOptions<GraphEmailDeliveryOptions>>();
             var logger = sp.GetService<ILogger<GraphEmailCredentialDeliveryService>>() ?? NullLogger<GraphEmailCredentialDeliveryService>.Instance;
             return new GraphEmailCredentialDeliveryService(graphClient, options, logger);

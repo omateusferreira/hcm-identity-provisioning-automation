@@ -44,6 +44,10 @@ public sealed class GraphEmailCredentialDeliveryService : ICredentialDeliverySer
 
         try
         {
+            var encodedName = System.Net.WebUtility.HtmlEncode(employee.FullName);
+            var encodedUpn = System.Net.WebUtility.HtmlEncode(upn.Value);
+            var encodedPassword = System.Net.WebUtility.HtmlEncode(temporaryPassword);
+
             var requestBody = new SendMailPostRequestBody
             {
                 Message = new Message
@@ -63,11 +67,11 @@ public sealed class GraphEmailCredentialDeliveryService : ICredentialDeliverySer
                     {
                         ContentType = BodyType.Html,
                         Content = $@"
-                            <p>Olá <strong>{employee.FullName}</strong>,</p>
+                            <p>Olá <strong>{encodedName}</strong>,</p>
                             <p>Sua conta corporativa foi provisionada no Microsoft Entra ID:</p>
                             <ul>
-                                <li><strong>Usuário (UPN):</strong> {upn.Value}</li>
-                                <li><strong>Senha Temporária:</strong> {temporaryPassword}</li>
+                                <li><strong>Usuário (UPN):</strong> {encodedUpn}</li>
+                                <li><strong>Senha Temporária:</strong> {encodedPassword}</li>
                             </ul>
                             <p>No primeiro login, você deverá obrigatoriamente redefinir esta senha.</p>
                             <p>Acesse o portal: <a href=""https://myapplications.microsoft.com"">https://myapplications.microsoft.com</a></p>"

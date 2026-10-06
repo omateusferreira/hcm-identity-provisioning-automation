@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET 10 (`net10.0`), C# 14, `Microsoft.Graph` (5.x), `Azure.Identity` (1.13+), `Microsoft.Extensions.Http.Resilience` (10.x), `Microsoft.Extensions.Options` (10.x), xUnit, `FluentAssertions`, `NSubstitute`.
 
-**Spec:** [`docs/superpowers/specs/2026-10-06-cycle-2-production-adapters-design.md`](file:///d:/Projects/hcm-identity-provisioning-automation/docs/superpowers/specs/2026-10-06-cycle-2-production-adapters-design.md)
+**Spec:** [`docs/superpowers/specs/2026-10-06-cycle-2-production-adapters-design.md`](docs/superpowers/specs/2026-10-06-cycle-2-production-adapters-design.md)
 
 ## Global Constraints
 

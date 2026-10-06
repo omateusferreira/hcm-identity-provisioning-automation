@@ -9,6 +9,8 @@
     "HcmSync__BatchPageSize": "50",
     "HcmSync__MaxDisablementPercentage": "10.0",
     "HcmSync__MaxDisablementCount": "25",
+    "EntraId__TenantDomain": "company.onmicrosoft.com",
+    "HcmRest__BaseUrl": "https://api.hcm.example.com",
     "GraphEmail__SenderEmail": "no-reply@company.com"
   }
 }

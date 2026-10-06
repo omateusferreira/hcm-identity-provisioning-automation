@@ -21,6 +21,8 @@ public class EntraIdGraphAdapter : IIdentityStore
     private IReadOnlyDictionary<string, ManagedGroup>? _cachedManagedGroups;
     private readonly SemaphoreSlim _groupsLock = new(1, 1);
 
+    public GraphServiceClient GraphClient => _graphClient;
+
     public void InvalidateManagedGroupsCache()
     {
         _cachedManagedGroups = null;

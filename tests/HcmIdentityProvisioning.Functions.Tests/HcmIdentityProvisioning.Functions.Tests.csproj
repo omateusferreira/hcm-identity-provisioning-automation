@@ -20,4 +20,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\HcmIdentityProvisioning.Functions\HcmIdentityProvisioning.Functions.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\src\HcmIdentityProvisioning.Infrastructure\Rules\rules.json">
+      <Link>Rules\rules.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

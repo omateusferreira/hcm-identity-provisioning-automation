@@ -8,10 +8,12 @@ using HcmIdentityProvisioning.Infrastructure.DependencyInjection;
 using HcmIdentityProvisioning.Infrastructure.Notifications;
 using HcmIdentityProvisioning.Infrastructure.Tests.Mocks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Kiota.Abstractions.Authentication;
+using NSubstitute;
 using Xunit;
 
 namespace HcmIdentityProvisioning.Infrastructure.Tests.Notifications;
@@ -160,5 +162,81 @@ public class GraphEmailCredentialDeliveryServiceTests
 
         deliveryService.Should().NotBeNull();
         deliveryService.Should().BeOfType<GraphEmailCredentialDeliveryService>();
+    }
+
+    [Fact]
+    public async Task DeliverInitialCredentialsAsync_WhenGraphFails_LogsErrorGracefully()
+    {
+        var handler = new MockHttpMessageHandler();
+        handler.RegisterResponse("POST", "users/no-reply@company.com/sendMail", HttpStatusCode.InternalServerError, "{\"error\": \"Server error\"}");
+
+        var graphClient = CreateMockGraphClient(handler);
+        var options = Options.Create(new GraphEmailDeliveryOptions
+        {
+            SenderEmail = "no-reply@company.com",
+            Subject = "Bem-vindo",
+            SaveToSentItems = false
+        });
+
+        var logger = Substitute.For<ILogger<GraphEmailCredentialDeliveryService>>();
+        var service = new GraphEmailCredentialDeliveryService(graphClient, options, logger);
+
+        var employee = new Employee(
+            EmployeeId.Create("EMP01").Value,
+            "John Doe",
+            EmployeeStatus.Active,
+            "Engineering",
+            "Software Engineer",
+            new Dictionary<string, string> { ["email"] = "john.recipient@external.com" });
+
+        var upn = UserPrincipalName.Create("john.doe@company.onmicrosoft.com").Value;
+
+        var act = async () => await service.DeliverInitialCredentialsAsync(employee, upn, "SecretTempPass123!");
+        await act.Should().NotThrowAsync();
+
+        logger.ReceivedWithAnyArgs().Log(
+            LogLevel.Error,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
+    public async Task DeliverInitialCredentialsAsync_WhenAttributesContainSpecialHtmlChars_EncodesHtmlProperly()
+    {
+        var handler = new MockHttpMessageHandler();
+        handler.RegisterResponse("POST", "users/no-reply@company.com/sendMail", HttpStatusCode.Accepted, "{}");
+
+        var graphClient = CreateMockGraphClient(handler);
+        var options = Options.Create(new GraphEmailDeliveryOptions
+        {
+            SenderEmail = "no-reply@company.com",
+            Subject = "Bem-vindo",
+            SaveToSentItems = false
+        });
+        var service = new GraphEmailCredentialDeliveryService(graphClient, options, NullLogger<GraphEmailCredentialDeliveryService>.Instance);
+
+        var employee = new Employee(
+            EmployeeId.Create("EMP01").Value,
+            "John <Doe> & Sons",
+            EmployeeStatus.Active,
+            "Engineering",
+            "Software Engineer",
+            new Dictionary<string, string> { ["email"] = "john.recipient@external.com" });
+
+        var upn = UserPrincipalName.Create("john.doe@company.onmicrosoft.com").Value;
+
+        await service.DeliverInitialCredentialsAsync(employee, upn, "Pass<123>&Temp");
+
+        handler.SentRequests.Should().HaveCount(1);
+        var json = await handler.SentRequests[0].Content!.ReadAsStringAsync();
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var htmlContent = doc.RootElement.GetProperty("Message").GetProperty("body").GetProperty("content").GetString()!;
+
+        htmlContent.Should().Contain("John &lt;Doe&gt; &amp; Sons");
+        htmlContent.Should().Contain("Pass&lt;123&gt;&amp;Temp");
+        htmlContent.Should().NotContain("John <Doe> & Sons");
+        htmlContent.Should().NotContain("Pass<123>&Temp");
     }
 }
