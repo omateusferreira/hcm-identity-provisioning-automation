@@ -4,9 +4,16 @@ using HcmIdentityProvisioning.Cli.Commands;
 using HcmIdentityProvisioning.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 var services = new ServiceCollection();
-services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Warning));
+services.AddLogging(builder =>
+{
+    builder.AddConsole(options =>
+    {
+        options.LogToStandardErrorThreshold = LogLevel.Warning;
+    }).SetMinimumLevel(LogLevel.Warning);
+});
 
 var settings = new SyncSettings
 {
@@ -46,4 +53,5 @@ var rootCommand = new RootCommand("HCM to Microsoft Entra ID Provisioning & Life
 rootCommand.AddCommand(SyncCommand.Create(sp));
 rootCommand.AddCommand(ValidateRulesCommand.Create());
 
-return await rootCommand.InvokeAsync(args);
+var exitCode = await rootCommand.InvokeAsync(args);
+return Environment.ExitCode != 0 ? Environment.ExitCode : exitCode;

@@ -40,6 +40,11 @@ public static class SyncCommand
                 report = await useCase.ExecuteAsync();
             }
 
+            if (report.CircuitBreakerTripped)
+            {
+                Environment.ExitCode = 2;
+            }
+
             if (jsonLogs)
             {
                 Console.WriteLine(JsonSerializer.Serialize(report));

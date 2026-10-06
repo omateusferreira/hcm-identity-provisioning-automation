@@ -36,6 +36,7 @@ public static class ValidateRulesCommand
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"Error: Rules file '{file.FullName}' not found.");
                 Console.ResetColor();
+                Environment.ExitCode = 1;
                 return;
             }
 
@@ -61,6 +62,7 @@ public static class ValidateRulesCommand
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"FAILURE: Rules evaluation failed: {ex.Message}");
                 Console.ResetColor();
+                Environment.ExitCode = 1;
             }
         }, rulesFileOption);
 
