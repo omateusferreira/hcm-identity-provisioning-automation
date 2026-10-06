@@ -1,4 +1,5 @@
 using System.CommandLine;
+using HcmIdentityProvisioning.Cli.Utils;
 using HcmIdentityProvisioning.Domain.Entities;
 using HcmIdentityProvisioning.Domain.Enums;
 using HcmIdentityProvisioning.Domain.ValueObjects;
@@ -10,31 +11,26 @@ public static class ValidateRulesCommand
 {
     public static Command Create()
     {
-        var rulesFileOption = new Option<FileInfo>(
+        var rulesFileOption = new Option<FileInfo?>(
             name: "--rules",
-            description: "Path to rules.json file.",
-            getDefaultValue: () => new FileInfo("src/HcmIdentityProvisioning.Infrastructure/Rules/rules.json"));
+            description: "Path to rules.json file (defaults to application bundle or RULES_FILE_PATH).");
 
         var cmd = new Command("validate-rules", "Validates the syntax and evaluability of rules.json")
         {
             rulesFileOption
         };
 
-        cmd.SetHandler(async (FileInfo file) =>
+        cmd.SetHandler(async (FileInfo? file) =>
         {
-            if (!file.Exists)
+            string resolvedPath;
+            try
             {
-                var resolved = ResolvePath(file.ToString());
-                if (File.Exists(resolved))
-                {
-                    file = new FileInfo(resolved);
-                }
+                resolvedPath = PathResolver.ResolveRulesPath(file?.FullName);
             }
-
-            if (!file.Exists)
+            catch (FileNotFoundException ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Error: Rules file '{file.FullName}' not found.");
+                Console.WriteLine($"Error: {ex.Message}");
                 Console.ResetColor();
                 Environment.ExitCode = 1;
                 return;
@@ -42,7 +38,7 @@ public static class ValidateRulesCommand
 
             try
             {
-                var adapter = MicrosoftRulesEngineAdapter.FromFile(file.FullName);
+                var adapter = MicrosoftRulesEngineAdapter.FromFile(resolvedPath);
                 var probeEmployee = new Employee(
                     EmployeeId.Create("TEST-01").Value,
                     "Probe Employee",
@@ -67,18 +63,5 @@ public static class ValidateRulesCommand
         }, rulesFileOption);
 
         return cmd;
-    }
-
-    private static string ResolvePath(string relativePath)
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, relativePath);
-            if (File.Exists(candidate))
-                return candidate;
-            current = current.Parent;
-        }
-        return relativePath;
     }
 }

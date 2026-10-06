@@ -8,7 +8,10 @@ namespace HcmIdentityProvisioning.Cli.Commands;
 
 public static class SyncCommand
 {
-    public static Command Create(IServiceProvider serviceProvider)
+    public static Command Create(IServiceProvider serviceProvider) =>
+        Create((_, _) => serviceProvider);
+
+    public static Command Create(Func<string?, string?, IServiceProvider> serviceProviderFactory)
     {
         var dryRunOption = new Option<bool>(
             name: "--dry-run",
@@ -18,15 +21,39 @@ public static class SyncCommand
             name: "--json-logs",
             description: "Output audit report as structured NDJSON for SIEM ingestion.");
 
+        var rulesOption = new Option<FileInfo?>(
+            name: "--rules",
+            description: "Path to rules.json file (defaults to application bundle or RULES_FILE_PATH).");
+
+        var fixturesOption = new Option<FileInfo?>(
+            name: "--fixtures",
+            description: "Path to synthetic-employees.json file (defaults to application bundle or FIXTURES_FILE_PATH).");
+
         var cmd = new Command("sync", "Executes HCM to Entra ID identity lifecycle synchronization.")
         {
             dryRunOption,
-            jsonLogsOption
+            jsonLogsOption,
+            rulesOption,
+            fixturesOption
         };
 
-        cmd.SetHandler(async (bool dryRun, bool jsonLogs) =>
+        cmd.SetHandler(async (bool dryRun, bool jsonLogs, FileInfo? rulesFile, FileInfo? fixturesFile) =>
         {
-            using var scope = serviceProvider.CreateScope();
+            IServiceProvider sp;
+            try
+            {
+                sp = serviceProviderFactory(rulesFile?.FullName, fixturesFile?.FullName);
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Error initializing configuration: {ex.Message}");
+                Console.ResetColor();
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            using var scope = sp.CreateScope();
             SyncReport report;
 
             if (dryRun)
@@ -85,7 +112,7 @@ public static class SyncCommand
                 }
                 Console.WriteLine();
             }
-        }, dryRunOption, jsonLogsOption);
+        }, dryRunOption, jsonLogsOption, rulesOption, fixturesOption);
 
         return cmd;
     }
