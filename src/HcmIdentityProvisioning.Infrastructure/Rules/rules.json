@@ -15,7 +15,7 @@
       {
         "RuleName": "AllStaffBaseAccess",
         "SuccessEvent": "grp-iam-all-staff",
-        "Expression": "Status.ToString() == \"Active\""
+        "Expression": "Status == \"Active\""
       }
     ]
   }
