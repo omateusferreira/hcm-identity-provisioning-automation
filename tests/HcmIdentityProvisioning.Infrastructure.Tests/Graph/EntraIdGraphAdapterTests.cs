@@ -583,4 +583,157 @@ public sealed class EntraIdGraphAdapterTests
         var secondBatch = JsonDocument.Parse(_mockHandler.GetSentRequestBody(1)).RootElement.GetProperty("requests").EnumerateArray().ToList();
         secondBatch.Should().HaveCount(5);
     }
+
+    [Fact]
+    public async Task GetManagedGroupsAsync_MemoizesResult_AndRefetchesAfterCacheInvalidation()
+    {
+        // Arrange
+        var group1Id = Guid.NewGuid();
+        var groupsJson = JsonSerializer.Serialize(new
+        {
+            value = new[]
+            {
+                new { id = group1Id.ToString(), displayName = "grp-iam-memoized" }
+            }
+        });
+        _mockHandler.SetupGroups(groupsJson);
+
+        // Act 1: Initial call
+        var result1 = await _sut.GetManagedGroupsAsync();
+
+        // Act 2: Second call within same instance
+        var result2 = await _sut.GetManagedGroupsAsync();
+
+        // Assert 1: Only 1 HTTP call made
+        var groupRequests = _mockHandler.SentRequests
+            .Where(r => r.RequestUri != null && r.RequestUri.AbsolutePath.EndsWith("/groups", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        groupRequests.Should().HaveCount(1);
+        result1.Should().BeSameAs(result2);
+
+        // Act 3: Invalidate cache and call again
+        _sut.InvalidateManagedGroupsCache();
+        var result3 = await _sut.GetManagedGroupsAsync();
+
+        // Assert 2: Second HTTP call made
+        var updatedGroupRequests = _mockHandler.SentRequests
+            .Where(r => r.RequestUri != null && r.RequestUri.AbsolutePath.EndsWith("/groups", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        updatedGroupRequests.Should().HaveCount(2);
+        result3.Should().ContainKey("grp-iam-memoized");
+    }
+
+    [Fact]
+    public async Task GetUsersByEmployeeIdsAsync_EscapesSingleQuotesInODataFilter()
+    {
+        // Arrange
+        var empWithQuote = EmployeeId.Create("EMP-O'CONNOR").Value;
+        _mockHandler.SetupGroups(JsonSerializer.Serialize(new { value = Array.Empty<object>() }));
+        _mockHandler.SetupUsers(JsonSerializer.Serialize(new { value = Array.Empty<object>() }));
+
+        // Act
+        await _sut.GetUsersByEmployeeIdsAsync(new[] { empWithQuote });
+
+        // Assert
+        var lastRequest = _mockHandler.SentRequests
+            .FirstOrDefault(r => r.RequestUri != null && r.RequestUri.AbsolutePath.EndsWith("/users", StringComparison.OrdinalIgnoreCase));
+        lastRequest.Should().NotBeNull();
+        var rawUri = Uri.UnescapeDataString(lastRequest!.RequestUri!.ToString());
+        rawUri.Should().Contain("employeeId in ('EMP-O''CONNOR')");
+    }
+
+    [Fact]
+    public async Task ApplyBatchMutationsAsync_WhenJoinerWithGuidEmpty_SetsRelativeODataIdAndDependsOn()
+    {
+        // Arrange
+        var emp = new Employee(
+            EmployeeId.Create("EMP-2001").Value,
+            "Carlos Eduardo",
+            EmployeeStatus.Active,
+            "Engineering",
+            "Software Engineer",
+            new Dictionary<string, string>());
+        var upn = UserPrincipalName.Create("carlos.eduardo@contoso.com").Value;
+        var groupId = Guid.NewGuid();
+
+        var actions = new DeltaAction[]
+        {
+            new CreateUserAction(emp, upn, "TempPass123!"),
+            new AddGroupMemberAction(Guid.Empty, groupId, "grp-iam-engineering")
+        };
+
+        _mockHandler.WhenBatch().RespondWith(req =>
+        {
+            var doc = JsonDocument.Parse(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var requests = doc.RootElement.GetProperty("requests");
+            var subResponses = new List<MockBatchSubResponse>();
+            foreach (var r in requests.EnumerateArray())
+            {
+                var id = r.GetProperty("id").GetString()!;
+                subResponses.Add(new MockBatchSubResponse(id, 200));
+            }
+            return MockHttpMessageHandler.CreateJsonResponse(MockHttpMessageHandler.CreateBatchResponseBody(subResponses));
+        });
+
+        // Act
+        await _sut.ApplyBatchMutationsAsync(actions);
+
+        // Assert
+        var batchDoc = JsonDocument.Parse(_mockHandler.LastRequestBody!);
+        var requestsArray = batchDoc.RootElement.GetProperty("requests").EnumerateArray().ToList();
+        requestsArray.Should().HaveCount(2);
+
+        var createStep = requestsArray[0];
+        var createStepId = createStep.GetProperty("id").GetString();
+        createStep.GetProperty("method").GetString().Should().Be("POST");
+        createStep.GetProperty("url").GetString().Should().Be("/users");
+
+        var addGroupStep = requestsArray[1];
+        addGroupStep.GetProperty("method").GetString().Should().Be("POST");
+        addGroupStep.GetProperty("url").GetString().Should().Be($"/groups/{groupId}/members/$ref");
+
+        // Verify dependsOn contains createStepId
+        addGroupStep.TryGetProperty("dependsOn", out var dependsOnProp).Should().BeTrue();
+        var dependsOnList = dependsOnProp.EnumerateArray().Select(e => e.GetString()).ToList();
+        dependsOnList.Should().Contain(createStepId);
+
+        // Verify @odata.id references relative step reference: $"${createStepId}"
+        var body = addGroupStep.GetProperty("body");
+        body.GetProperty("@odata.id").GetString().Should().Be($"${createStepId}");
+    }
+
+    [Fact]
+    public async Task ApplyBatchMutationsAsync_WhenAddGroupMemberWithGuidEmptyWithoutCreateUser_HandlesGracefullyWithoutThrowing()
+    {
+        // Arrange: AddGroupMemberAction with Guid.Empty with NO preceding CreateUserAction
+        var groupId = Guid.NewGuid();
+        var actions = new DeltaAction[]
+        {
+            new AddGroupMemberAction(Guid.Empty, groupId, "grp-iam-standalone")
+        };
+
+        _mockHandler.WhenBatch().RespondWith(req =>
+        {
+            var doc = JsonDocument.Parse(req.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var requests = doc.RootElement.GetProperty("requests");
+            var subResponses = new List<MockBatchSubResponse>();
+            foreach (var r in requests.EnumerateArray())
+            {
+                var id = r.GetProperty("id").GetString()!;
+                subResponses.Add(new MockBatchSubResponse(id, 200));
+            }
+            return MockHttpMessageHandler.CreateJsonResponse(MockHttpMessageHandler.CreateBatchResponseBody(subResponses));
+        });
+
+        // Act: Should complete gracefully without throwing an unhandled exception
+        Func<Task> act = async () => await _sut.ApplyBatchMutationsAsync(actions);
+        await act.Should().NotThrowAsync();
+
+        // Assert: Request was sent with Guid.Empty directoryObjects reference fallback
+        var batchDoc = JsonDocument.Parse(_mockHandler.LastRequestBody!);
+        var requestsArray = batchDoc.RootElement.GetProperty("requests").EnumerateArray().ToList();
+        requestsArray.Should().HaveCount(1);
+        requestsArray[0].GetProperty("body").GetProperty("@odata.id").GetString()
+            .Should().Be($"https://graph.microsoft.com/v1.0/directoryObjects/{Guid.Empty}");
+    }
 }

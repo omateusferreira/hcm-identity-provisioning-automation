@@ -427,6 +427,46 @@ public sealed class GenericRestHcmConnectorTests
         uriWithoutExistingQuery.Should().Be("/api/v1/employees?pageNumber=1&pageSize=20");
     }
 
+    [Fact]
+    public async Task GetEmployeesPageAsync_DisposesHttpResponseMessageAfterExecution()
+    {
+        // Arrange
+        var trackingResponse = new TrackingHttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(SampleStandardJson, Encoding.UTF8, "application/json")
+        };
+
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult<HttpResponseMessage>(trackingResponse));
+        var client = new HttpClient(handler);
+        var mapper = new DefaultHcmPayloadMapper();
+        var options = new RestHcmConnectorOptions
+        {
+            BaseUrl = "https://hcm.example.com",
+            Endpoint = "/employees"
+        };
+        var connector = new GenericRestHcmConnector(client, mapper, options);
+
+        // Act
+        var result = await connector.GetEmployeesPageAsync(1, 10);
+
+        // Assert
+        result.Items.Should().NotBeEmpty();
+        trackingResponse.WasDisposed.Should().BeTrue();
+    }
+
+    private sealed class TrackingHttpResponseMessage : HttpResponseMessage
+    {
+        public bool WasDisposed { get; private set; }
+
+        public TrackingHttpResponseMessage(HttpStatusCode statusCode) : base(statusCode) { }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            WasDisposed = true;
+        }
+    }
+
     private sealed class TestHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;

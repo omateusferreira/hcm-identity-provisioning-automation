@@ -18,6 +18,13 @@ public class EntraIdGraphAdapter : IIdentityStore
     private readonly EntraIdGraphOptions _options;
     private readonly ILogger<EntraIdGraphAdapter> _logger;
     private readonly GraphServiceClient _graphClient;
+    private IReadOnlyDictionary<string, ManagedGroup>? _cachedManagedGroups;
+    private readonly SemaphoreSlim _groupsLock = new(1, 1);
+
+    public void InvalidateManagedGroupsCache()
+    {
+        _cachedManagedGroups = null;
+    }
 
     public EntraIdGraphAdapter(
         IOptions<EntraIdGraphOptions> options,
@@ -72,42 +79,61 @@ public class EntraIdGraphAdapter : IIdentityStore
 
     public async Task<IReadOnlyDictionary<string, ManagedGroup>> GetManagedGroupsAsync(CancellationToken ct = default)
     {
-        _logger.LogDebug("Retrieving managed groups starting with prefix '{Prefix}'", _options.ManagedGroupPrefix);
-
-        var groupsByName = new Dictionary<string, ManagedGroup>(StringComparer.OrdinalIgnoreCase);
-
-        var response = await _graphClient.Groups.GetAsync(rc =>
+        if (_cachedManagedGroups != null)
         {
-            rc.QueryParameters.Filter = $"startswith(displayName, '{_options.ManagedGroupPrefix}')";
-            rc.QueryParameters.Select = ["id", "displayName"];
-        }, ct);
-
-        while (response != null)
-        {
-            if (response.Value != null)
-            {
-                foreach (var group in response.Value)
-                {
-                    if (group.Id != null &&
-                        Guid.TryParse(group.Id, out var groupId) &&
-                        !string.IsNullOrWhiteSpace(group.DisplayName) &&
-                        group.DisplayName.StartsWith(_options.ManagedGroupPrefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        groupsByName[group.DisplayName] = new ManagedGroup(groupId, group.DisplayName);
-                    }
-                }
-            }
-
-            if (string.IsNullOrEmpty(response.OdataNextLink))
-            {
-                break;
-            }
-
-            response = await _graphClient.Groups.WithUrl(response.OdataNextLink).GetAsync(cancellationToken: ct);
+            return _cachedManagedGroups;
         }
 
-        _logger.LogInformation("Found {Count} managed groups matching prefix '{Prefix}'", groupsByName.Count, _options.ManagedGroupPrefix);
-        return groupsByName;
+        await _groupsLock.WaitAsync(ct);
+        try
+        {
+            if (_cachedManagedGroups != null)
+            {
+                return _cachedManagedGroups;
+            }
+
+            _logger.LogDebug("Retrieving managed groups starting with prefix '{Prefix}'", _options.ManagedGroupPrefix);
+
+            var groupsByName = new Dictionary<string, ManagedGroup>(StringComparer.OrdinalIgnoreCase);
+
+            var response = await _graphClient.Groups.GetAsync(rc =>
+            {
+                rc.QueryParameters.Filter = $"startswith(displayName, '{_options.ManagedGroupPrefix}')";
+                rc.QueryParameters.Select = ["id", "displayName"];
+            }, ct);
+
+            while (response != null)
+            {
+                if (response.Value != null)
+                {
+                    foreach (var group in response.Value)
+                    {
+                        if (group.Id != null &&
+                            Guid.TryParse(group.Id, out var groupId) &&
+                            !string.IsNullOrWhiteSpace(group.DisplayName) &&
+                            group.DisplayName.StartsWith(_options.ManagedGroupPrefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            groupsByName[group.DisplayName] = new ManagedGroup(groupId, group.DisplayName);
+                        }
+                    }
+                }
+
+                if (string.IsNullOrEmpty(response.OdataNextLink))
+                {
+                    break;
+                }
+
+                response = await _graphClient.Groups.WithUrl(response.OdataNextLink).GetAsync(cancellationToken: ct);
+            }
+
+            _logger.LogInformation("Found {Count} managed groups matching prefix '{Prefix}'", groupsByName.Count, _options.ManagedGroupPrefix);
+            _cachedManagedGroups = groupsByName;
+            return _cachedManagedGroups;
+        }
+        finally
+        {
+            _groupsLock.Release();
+        }
     }
 
     public async Task<bool> IsUserPrincipalNameAvailableAsync(UserPrincipalName upn, CancellationToken ct = default)
@@ -152,7 +178,7 @@ public class EntraIdGraphAdapter : IIdentityStore
 
         foreach (var chunk in distinctEmployeeIds.Chunk(chunkSize))
         {
-            var idList = string.Join("', '", chunk.Select(e => e.Value));
+            var idList = string.Join("', '", chunk.Select(e => e.Value.Replace("'", "''")));
             var usersResponse = await _graphClient.Users.GetAsync(rc =>
             {
                 rc.QueryParameters.Filter = $"employeeId in ('{idList}')";
@@ -241,12 +267,48 @@ public class EntraIdGraphAdapter : IIdentityStore
     {
         var batch = new BatchRequestContentCollection(_graphClient);
         var actionByStepId = new Dictionary<string, DeltaAction>();
+        string? lastCreateUserStepId = null;
 
         foreach (var action in chunk)
         {
-            var reqInfo = CreateRequestInformationForAction(action);
-            var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
-            actionByStepId[stepId] = action;
+            if (action is AddGroupMemberAction addGroup && addGroup.GraphId == Guid.Empty)
+            {
+                if (string.IsNullOrWhiteSpace(lastCreateUserStepId))
+                {
+                    _logger.LogWarning(
+                        "AddGroupMemberAction for group {GroupId} specifies Guid.Empty without a preceding CreateUserAction in the batch chunk. Handling gracefully.",
+                        addGroup.GroupId);
+                    var reqInfo = CreateRequestInformationForAction(action, null);
+                    var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+                    actionByStepId[stepId] = action;
+                }
+                else
+                {
+                    var reqInfo = CreateRequestInformationForAction(action, lastCreateUserStepId);
+                    var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+                    actionByStepId[stepId] = action;
+
+                    if (batch.BatchRequestSteps.TryGetValue(stepId, out var batchStep))
+                    {
+                        batchStep.DependsOn ??= new List<string>();
+                        if (!batchStep.DependsOn.Contains(lastCreateUserStepId))
+                        {
+                            batchStep.DependsOn.Add(lastCreateUserStepId);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                var reqInfo = CreateRequestInformationForAction(action);
+                var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+                actionByStepId[stepId] = action;
+
+                if (action is CreateUserAction)
+                {
+                    lastCreateUserStepId = stepId;
+                }
+            }
         }
 
         var batchResponse = await _graphClient.Batch.PostAsync(batch, ct);
@@ -339,12 +401,37 @@ public class EntraIdGraphAdapter : IIdentityStore
     {
         var batch = new BatchRequestContentCollection(_graphClient);
         var actionByStepId = new Dictionary<string, DeltaAction>();
+        string? lastCreateUserStepId = null;
 
         foreach (var action in actions)
         {
-            var reqInfo = CreateRequestInformationForAction(action);
-            var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
-            actionByStepId[stepId] = action;
+            if (action is AddGroupMemberAction addGroup && addGroup.GraphId == Guid.Empty)
+            {
+                var reqInfo = CreateRequestInformationForAction(action, lastCreateUserStepId);
+                var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+                actionByStepId[stepId] = action;
+
+                if (!string.IsNullOrWhiteSpace(lastCreateUserStepId) &&
+                    batch.BatchRequestSteps.TryGetValue(stepId, out var batchStep))
+                {
+                    batchStep.DependsOn ??= new List<string>();
+                    if (!batchStep.DependsOn.Contains(lastCreateUserStepId))
+                    {
+                        batchStep.DependsOn.Add(lastCreateUserStepId);
+                    }
+                }
+            }
+            else
+            {
+                var reqInfo = CreateRequestInformationForAction(action);
+                var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+                actionByStepId[stepId] = action;
+
+                if (action is CreateUserAction)
+                {
+                    lastCreateUserStepId = stepId;
+                }
+            }
         }
 
         var batchResponse = await _graphClient.Batch.PostAsync(batch, ct);
@@ -368,7 +455,7 @@ public class EntraIdGraphAdapter : IIdentityStore
         return true;
     }
 
-    private RequestInformation CreateRequestInformationForAction(DeltaAction action) => action switch
+    private RequestInformation CreateRequestInformationForAction(DeltaAction action, string? relativeUserStepId = null) => action switch
     {
         CreateUserAction create => _graphClient.Users.ToPostRequestInformation(new User
         {
@@ -403,7 +490,9 @@ public class EntraIdGraphAdapter : IIdentityStore
 
         AddGroupMemberAction addGroup => _graphClient.Groups[addGroup.GroupId.ToString()].Members.Ref.ToPostRequestInformation(new ReferenceCreate
         {
-            OdataId = $"https://graph.microsoft.com/v1.0/directoryObjects/{addGroup.GraphId}"
+            OdataId = addGroup.GraphId == Guid.Empty && !string.IsNullOrWhiteSpace(relativeUserStepId)
+                ? $"${relativeUserStepId}"
+                : $"https://graph.microsoft.com/v1.0/directoryObjects/{addGroup.GraphId}"
         }),
 
         RemoveGroupMemberAction removeGroup => _graphClient.Groups[removeGroup.GroupId.ToString()].Members[removeGroup.GraphId.ToString()].Ref.ToDeleteRequestInformation(),

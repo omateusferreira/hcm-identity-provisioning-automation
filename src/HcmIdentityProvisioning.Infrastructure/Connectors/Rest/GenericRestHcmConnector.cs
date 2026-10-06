@@ -42,7 +42,7 @@ public sealed class GenericRestHcmConnector : IHcmConnector
 
         ApplyAuthenticationAndHeaders(request);
 
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
 
         return await _mapper.MapResponseAsync(response, pageNumber, pageSize, ct);
     }

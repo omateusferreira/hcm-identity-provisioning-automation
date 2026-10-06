@@ -250,16 +250,23 @@ public sealed class ProductionPipelineIntegrationTests
                         if (bodyElem.TryGetProperty("@odata.id", out var odataElem))
                         {
                             var odataId = odataElem.GetString() ?? string.Empty;
-                            var lastSeg = odataId.Split('/').Last();
-                            if (Guid.TryParse(lastSeg, out var targetUserId))
+                            if (odataId.StartsWith('$') && lastCreatedUser != null)
                             {
-                                if (targetUserId == Guid.Empty && lastCreatedUser != null)
+                                lastCreatedUser.MemberOfGroupIds.Add(addGroupId);
+                            }
+                            else
+                            {
+                                var lastSeg = odataId.Split('/').Last();
+                                if (Guid.TryParse(lastSeg, out var targetUserId))
                                 {
-                                    lastCreatedUser.MemberOfGroupIds.Add(addGroupId);
-                                }
-                                else if (directory.Users.TryGetValue(targetUserId, out var user))
-                                {
-                                    user.MemberOfGroupIds.Add(addGroupId);
+                                    if (targetUserId == Guid.Empty && lastCreatedUser != null)
+                                    {
+                                        lastCreatedUser.MemberOfGroupIds.Add(addGroupId);
+                                    }
+                                    else if (directory.Users.TryGetValue(targetUserId, out var user))
+                                    {
+                                        user.MemberOfGroupIds.Add(addGroupId);
+                                    }
                                 }
                             }
                         }
