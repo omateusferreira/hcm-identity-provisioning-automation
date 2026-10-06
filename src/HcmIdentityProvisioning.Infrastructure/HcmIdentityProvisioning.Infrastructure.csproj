@@ -1,8 +1,18 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\HcmIdentityProvisioning.Domain\HcmIdentityProvisioning.Domain.csproj" />
     <ProjectReference Include="..\HcmIdentityProvisioning.Application\HcmIdentityProvisioning.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RulesEngine" Version="5.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Rules\rules.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <PropertyGroup>

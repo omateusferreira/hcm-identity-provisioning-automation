@@ -1,0 +1,22 @@
+[
+  {
+    "WorkflowName": "EntraIdGroupAssignment",
+    "Rules": [
+      {
+        "RuleName": "FinanceDepartmentAccess",
+        "SuccessEvent": "grp-iam-finance",
+        "Expression": "Department == \"Financeiro\""
+      },
+      {
+        "RuleName": "EngineeringAccess",
+        "SuccessEvent": "grp-iam-engineering",
+        "Expression": "Department == \"Tecnologia\" AND JobTitle.Contains(\"Engenheiro\")"
+      },
+      {
+        "RuleName": "AllStaffBaseAccess",
+        "SuccessEvent": "grp-iam-all-staff",
+        "Expression": "Status.ToString() == \"Active\""
+      }
+    ]
+  }
+]
