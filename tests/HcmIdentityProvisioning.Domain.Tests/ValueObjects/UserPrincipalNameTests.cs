@@ -15,6 +15,8 @@ public class UserPrincipalNameTests
     [InlineData("user@")]
     [InlineData("user@company")]
     [InlineData("user@@company.com")]
+    [InlineData("user@.example.com")]
+    [InlineData("user@example.com.")]
     public void Create_WithInvalidFormat_ShouldFail(string? raw)
     {
         var result = UserPrincipalName.Create(raw);

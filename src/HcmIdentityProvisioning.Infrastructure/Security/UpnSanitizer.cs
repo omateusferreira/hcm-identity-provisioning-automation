@@ -44,6 +44,7 @@ public static class UpnSanitizer
         int counter = 2;
         while (counter < 1000)
         {
+            ct.ThrowIfCancellationRequested();
             var next = UserPrincipalName.Create($"{slug}{counter}@{domain}").Value;
             if (await store.IsUserPrincipalNameAvailableAsync(next, ct))
                 return next;

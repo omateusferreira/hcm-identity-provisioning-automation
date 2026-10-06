@@ -91,4 +91,28 @@ public class SyntheticHcmConnectorTests
         emp.FullName.Should().Be("Custom Tester");
         emp.ExtendedAttributes.Should().ContainKey("role").WhoseValue.Should().Be("lead");
     }
+
+    [Fact]
+    public async Task FromJson_ExtendedAttributes_AreCaseInsensitive()
+    {
+        var json = """
+        [
+          {
+            "id": "EMP-999",
+            "fullName": "Custom Tester",
+            "status": "Active",
+            "department": "QA",
+            "jobTitle": "Tester",
+            "extendedAttributes": { "personalEmail": "tester@example.com" }
+          }
+        ]
+        """;
+
+        var connector = SyntheticHcmConnector.FromJson(json);
+        var page = await connector.GetEmployeesPageAsync(1, 10);
+        var emp = page.Items[0];
+
+        emp.ExtendedAttributes.Should().ContainKey("PersonalEmail");
+        emp.ExtendedAttributes["PERSONALEMAIL"].Should().Be("tester@example.com");
+    }
 }

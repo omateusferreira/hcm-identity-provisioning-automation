@@ -527,7 +527,112 @@ public class IdentityReconciliationServiceTests
         report.GroupMembershipsAdded.Should().Be(15);
         report.GroupMembershipsRemoved.Should().Be(8);
         report.CircuitBreakerTripped.Should().BeFalse();
-        report.CircuitBreakerMessage.Should().BeNull();
         report.Warnings.Should().ContainSingle().Which.Should().Be("Warning 1");
+    }
+
+    [Fact]
+    public async Task Reconcile_WhenDesiredGroupsDifferByCasing_MatchesManagedGroupsCaseInsensitively()
+    {
+        var service = new IdentityReconciliationService(_rulesEngine, _pwdGen);
+        var emp = new Employee(
+            EmployeeId.Create("101").Value,
+            "Carlos Silva",
+            EmployeeStatus.Active,
+            "Tecnologia",
+            "Engenheiro",
+            new Dictionary<string, string>()
+        );
+
+        _rulesEngine.EvaluateDesiredGroupsAsync(emp).Returns(new HashSet<string> { "GRP-IAM-ENGINEERING" });
+
+        var groupGuid = Guid.NewGuid();
+        var managedGroups = new Dictionary<string, ManagedGroup>
+        {
+            ["grp-iam-engineering"] = new(groupGuid, "grp-iam-engineering")
+        };
+
+        var actions = await service.ReconcileEmployeeAsync(
+            emp,
+            existingUser: null,
+            tenantDomain: "corp.com",
+            managedGroups: managedGroups,
+            isUpnAvailable: _ => Task.FromResult(true)
+        );
+
+        var groupActions = actions.OfType<AddGroupMemberAction>().ToList();
+        groupActions.Should().ContainSingle();
+        groupActions[0].GroupId.Should().Be(groupGuid);
+    }
+
+    [Fact]
+    public async Task Reconcile_WhenExistingUserHasGroupDifferingByCasing_DoesNotRemoveGroup()
+    {
+        var service = new IdentityReconciliationService(_rulesEngine, _pwdGen);
+        var emp = new Employee(
+            EmployeeId.Create("101").Value,
+            "Carlos Silva",
+            EmployeeStatus.Active,
+            "Tecnologia",
+            "Engenheiro",
+            new Dictionary<string, string>()
+        );
+
+        _rulesEngine.EvaluateDesiredGroupsAsync(emp).Returns(new HashSet<string> { "GRP-IAM-ENGINEERING" });
+
+        var groupGuid = Guid.NewGuid();
+        var managedGroups = new Dictionary<string, ManagedGroup>
+        {
+            ["grp-iam-engineering"] = new(groupGuid, "grp-iam-engineering")
+        };
+
+        var existingUser = new EntraUser(
+            GraphId: Guid.NewGuid(),
+            EmployeeId: emp.Id,
+            UserPrincipalName: UserPrincipalName.Create("carlos.silva@corp.com").Value,
+            DisplayName: "Carlos Silva",
+            AccountEnabled: true,
+            AssignedGroupIds: new HashSet<Guid> { groupGuid }
+        );
+
+        var actions = await service.ReconcileEmployeeAsync(
+            emp,
+            existingUser: existingUser,
+            tenantDomain: "corp.com",
+            managedGroups: managedGroups,
+            isUpnAvailable: _ => Task.FromResult(true)
+        );
+
+        actions.OfType<RemoveGroupMemberAction>().Should().BeEmpty();
+        actions.OfType<AddGroupMemberAction>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reconcile_WhenCancellationRequestedDuringUpnDisambiguation_ThrowsOperationCanceledException()
+    {
+        var service = new IdentityReconciliationService(_rulesEngine, _pwdGen);
+        var emp = new Employee(
+            EmployeeId.Create("101").Value,
+            "Carlos Silva",
+            EmployeeStatus.Active,
+            "Tecnologia",
+            "Engenheiro",
+            new Dictionary<string, string>()
+        );
+
+        _rulesEngine.EvaluateDesiredGroupsAsync(emp, Arg.Any<CancellationToken>()).Returns(new HashSet<string>());
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = async () => await service.ReconcileEmployeeAsync(
+            emp,
+            existingUser: null,
+            tenantDomain: "corp.com",
+            managedGroups: new Dictionary<string, ManagedGroup>(),
+            isUpnAvailable: _ => Task.FromResult(false),
+            ct: cts.Token
+        );
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 }

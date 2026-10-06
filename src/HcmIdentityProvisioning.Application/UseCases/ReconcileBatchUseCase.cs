@@ -65,7 +65,7 @@ public sealed class ReconcileBatchUseCase
                     existing,
                     _settings.TenantDomain,
                     managedGroups,
-                    async upn => !allocatedUpns.Contains(upn.Value) && await _identityStore.IsUserPrincipalNameAvailableAsync(upn, ct),
+                    async (upn, cToken) => !allocatedUpns.Contains(upn.Value) && await _identityStore.IsUserPrincipalNameAvailableAsync(upn, cToken),
                     w => warnings.Add(w),
                     ct
                 );

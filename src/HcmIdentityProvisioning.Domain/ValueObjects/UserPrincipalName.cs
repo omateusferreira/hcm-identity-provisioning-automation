@@ -22,8 +22,15 @@ public sealed record UserPrincipalName
 
         var trimmed = value.Trim().ToLowerInvariant();
         var parts = trimmed.Split('@');
-        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]) || !parts[1].Contains('.'))
-            return Result<UserPrincipalName, string>.Failure($"Invalid UPN format: '{value}'.");
+        if (parts.Length != 2 ||
+            string.IsNullOrWhiteSpace(parts[0]) ||
+            string.IsNullOrWhiteSpace(parts[1]) ||
+            !parts[1].Contains('.') ||
+            parts[1].StartsWith('.') ||
+            parts[1].EndsWith('.'))
+        {
+            return Result<UserPrincipalName, string>.Failure(DomainErrors.UserPrincipalNameInvalidFormat);
+        }
 
         return Result<UserPrincipalName, string>.Success(new UserPrincipalName(trimmed, parts[0], parts[1]));
     }

@@ -20,7 +20,7 @@ public sealed class MockCredentialDeliveryService : ICredentialDeliveryService
         string temporaryPassword,
         CancellationToken ct = default)
     {
-        if (employee.ExtendedAttributes.TryGetValue("email", out var email) && !string.IsNullOrWhiteSpace(email))
+        if (TryGetDeliveryEmail(employee, out var email))
         {
             _logger.LogInformation("Credential dispatch mocked for employee {EmployeeId} ({Upn}) to out-of-band email {Email}", employee.Id, upn, email);
         }
@@ -30,5 +30,37 @@ public sealed class MockCredentialDeliveryService : ICredentialDeliveryService
         }
 
         return Task.CompletedTask;
+    }
+
+    private static bool TryGetDeliveryEmail(Employee employee, out string email)
+    {
+        if (employee.ExtendedAttributes != null)
+        {
+            if (employee.ExtendedAttributes.TryGetValue("personalEmail", out var pe) && !string.IsNullOrWhiteSpace(pe))
+            {
+                email = pe;
+                return true;
+            }
+
+            if (employee.ExtendedAttributes.TryGetValue("email", out var directEmail) && !string.IsNullOrWhiteSpace(directEmail))
+            {
+                email = directEmail;
+                return true;
+            }
+
+            foreach (var kvp in employee.ExtendedAttributes)
+            {
+                if ((string.Equals(kvp.Key, "personalEmail", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(kvp.Key, "email", StringComparison.OrdinalIgnoreCase)) &&
+                    !string.IsNullOrWhiteSpace(kvp.Value))
+                {
+                    email = kvp.Value;
+                    return true;
+                }
+            }
+        }
+
+        email = string.Empty;
+        return false;
     }
 }

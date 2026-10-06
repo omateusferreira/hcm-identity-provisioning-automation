@@ -2,21 +2,25 @@ namespace HcmIdentityProvisioning.Domain.Common;
 
 public readonly struct Result<TValue, TError>
 {
+    private readonly TValue _value;
+
     public bool IsSuccess { get; }
-    public TValue Value { get; }
+    public TValue Value => !IsSuccess 
+        ? throw new InvalidOperationException("Cannot access Value on a failed Result.") 
+        : _value;
     public TError Error { get; }
 
     private Result(TValue value)
     {
         IsSuccess = true;
-        Value = value;
+        _value = value;
         Error = default!;
     }
 
     private Result(TError error)
     {
         IsSuccess = false;
-        Value = default!;
+        _value = default!;
         Error = error;
     }
 

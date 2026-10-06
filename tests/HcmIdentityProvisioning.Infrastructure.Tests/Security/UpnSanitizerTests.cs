@@ -56,4 +56,19 @@ public class UpnSanitizerTests
         var slug = UpnSanitizer.SanitizeNameToSlug(fullName!);
         slug.Should().Be(expectedSlug);
     }
+
+    [Fact]
+    public async Task ResolveAvailableUpnAsync_WhenCancellationRequested_ThrowsOperationCanceledException()
+    {
+        var store = Substitute.For<IIdentityStore>();
+        store.IsUserPrincipalNameAvailableAsync(Arg.Any<UserPrincipalName>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = async () => await UpnSanitizer.ResolveAvailableUpnAsync("john.doe", "corp.com", store, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
 }

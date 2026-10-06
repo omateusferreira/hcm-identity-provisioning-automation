@@ -14,6 +14,8 @@ public class EmailAddressTests
     [InlineData("@missingusername.com")]
     [InlineData("missingdomain@")]
     [InlineData("missingdot@domain")]
+    [InlineData("user@.example.com")]
+    [InlineData("user@example.com.")]
     public void Create_WithInvalidValue_ShouldFail(string? raw)
     {
         var result = EmailAddress.Create(raw);

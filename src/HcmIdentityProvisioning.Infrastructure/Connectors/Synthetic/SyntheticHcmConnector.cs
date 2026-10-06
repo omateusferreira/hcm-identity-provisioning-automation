@@ -13,7 +13,11 @@ public sealed class SyntheticHcmConnector : IHcmConnector
 
     public SyntheticHcmConnector(IEnumerable<Employee> employees)
     {
-        _employees = employees.ToList();
+        _employees = employees.Select(e =>
+            e.ExtendedAttributes is Dictionary<string, string> d && d.Comparer == StringComparer.OrdinalIgnoreCase
+                ? e
+                : e with { ExtendedAttributes = new Dictionary<string, string>(e.ExtendedAttributes, StringComparer.OrdinalIgnoreCase) }
+        ).ToList();
     }
 
     public static SyntheticHcmConnector FromFixturesFile(string path)
@@ -49,7 +53,7 @@ public sealed class SyntheticHcmConnector : IHcmConnector
                 }
             }
 
-            list.Add(new Employee(id, name, status, dept, job, attrs));
+            list.Add(new Employee(id, name, status, dept, job, new Dictionary<string, string>(attrs, StringComparer.OrdinalIgnoreCase)));
         }
 
         return new SyntheticHcmConnector(list);

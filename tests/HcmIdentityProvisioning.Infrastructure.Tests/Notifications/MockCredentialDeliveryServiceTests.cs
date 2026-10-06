@@ -114,4 +114,40 @@ public class MockCredentialDeliveryServiceTests
             Arg.Any<Func<object, Exception?, string>>()
         );
     }
+
+    [Theory]
+    [InlineData("personalEmail")]
+    [InlineData("PersonalEmail")]
+    [InlineData("PERSONALEMAIL")]
+    public async Task DeliverInitialCredentialsAsync_WhenEmployeeHasPersonalEmailKey_LogsInformation(string keyName)
+    {
+        // Arrange
+        var empId = EmployeeId.Create("EMP004").Value;
+        var upn = UserPrincipalName.Create("lucas.moura@contoso.com").Value;
+        var employee = new Employee(
+            Id: empId,
+            FullName: "Lucas Moura",
+            Status: EmployeeStatus.Active,
+            Department: "Sales",
+            JobTitle: "Account Exec",
+            ExtendedAttributes: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [keyName] = "lucas.personal@example.com"
+            }
+        );
+
+        // Act
+        await _service.DeliverInitialCredentialsAsync(employee, upn, "TempPass123!");
+
+        // Assert
+        _logger.Received(1).Log(
+            LogLevel.Information,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("Credential dispatch mocked") &&
+                                o.ToString()!.Contains("EMP004") &&
+                                o.ToString()!.Contains("lucas.personal@example.com")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>()
+        );
+    }
 }

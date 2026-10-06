@@ -22,7 +22,17 @@ public class ResultTests
         var result = Result<int, string>.Failure("Operation failed");
 
         result.IsSuccess.Should().BeFalse();
-        result.Value.Should().Be(0);
         result.Error.Should().Be("Operation failed");
+    }
+
+    [Fact]
+    public void AccessingValue_OnFailure_ShouldThrowInvalidOperationException()
+    {
+        var result = Result<int, string>.Failure("Operation failed");
+
+        var act = () => _ = result.Value;
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("Cannot access Value on a failed Result.");
     }
 }

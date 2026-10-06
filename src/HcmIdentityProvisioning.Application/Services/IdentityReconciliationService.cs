@@ -21,7 +21,7 @@ public sealed class IdentityReconciliationService
         _passwordGenerator = passwordGenerator;
     }
 
-    public async Task<IReadOnlyList<DeltaAction>> ReconcileEmployeeAsync(
+    public Task<IReadOnlyList<DeltaAction>> ReconcileEmployeeAsync(
         Employee employee,
         EntraUser? existingUser,
         string tenantDomain,
@@ -29,9 +29,32 @@ public sealed class IdentityReconciliationService
         Func<UserPrincipalName, Task<bool>> isUpnAvailable,
         Action<string>? onWarning = null,
         CancellationToken ct = default)
+        => ReconcileEmployeeAsync(
+            employee,
+            existingUser,
+            tenantDomain,
+            managedGroups,
+            (upn, _) => isUpnAvailable(upn),
+            onWarning,
+            ct);
+
+    public async Task<IReadOnlyList<DeltaAction>> ReconcileEmployeeAsync(
+        Employee employee,
+        EntraUser? existingUser,
+        string tenantDomain,
+        IReadOnlyDictionary<string, ManagedGroup> managedGroups,
+        Func<UserPrincipalName, CancellationToken, Task<bool>> isUpnAvailable,
+        Action<string>? onWarning = null,
+        CancellationToken ct = default)
     {
         var actions = new List<DeltaAction>();
-        var desiredGroups = await _rulesEngine.EvaluateDesiredGroupsAsync(employee, ct);
+        var desiredGroups = new HashSet<string>(await _rulesEngine.EvaluateDesiredGroupsAsync(employee, ct), StringComparer.OrdinalIgnoreCase);
+
+        var caseInsensitiveManagedGroups = new Dictionary<string, ManagedGroup>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in managedGroups)
+        {
+            caseInsensitiveManagedGroups.TryAdd(kvp.Key, kvp.Value);
+        }
 
         // 1. Joiner Workflow
         if (existingUser is null)
@@ -40,14 +63,14 @@ public sealed class IdentityReconciliationService
                 return actions;
 
             var slug = SanitizeNameToSlug(employee.FullName);
-            var upn = await ResolveAvailableUpnAsync(slug, tenantDomain, isUpnAvailable);
+            var upn = await ResolveAvailableUpnAsync(slug, tenantDomain, isUpnAvailable, ct);
             var tempPassword = _passwordGenerator.GeneratePassword(24);
 
             actions.Add(new CreateUserAction(employee, upn, tempPassword));
 
             foreach (var groupName in desiredGroups)
             {
-                if (managedGroups.TryGetValue(groupName, out var group))
+                if (caseInsensitiveManagedGroups.TryGetValue(groupName, out var group))
                 {
                     actions.Add(new AddGroupMemberAction(Guid.Empty, group.Id, group.DisplayName));
                 }
@@ -69,7 +92,7 @@ public sealed class IdentityReconciliationService
                 actions.Add(new RevokeSessionsAction(existingUser.GraphId));
             }
 
-            foreach (var managedGroup in managedGroups.Values)
+            foreach (var managedGroup in caseInsensitiveManagedGroups.Values)
             {
                 if (existingUser.AssignedGroupIds.Contains(managedGroup.Id))
                 {
@@ -93,7 +116,7 @@ public sealed class IdentityReconciliationService
 
         foreach (var groupName in desiredGroups)
         {
-            if (managedGroups.TryGetValue(groupName, out var group))
+            if (caseInsensitiveManagedGroups.TryGetValue(groupName, out var group))
             {
                 if (!existingUser.AssignedGroupIds.Contains(group.Id))
                 {
@@ -106,7 +129,7 @@ public sealed class IdentityReconciliationService
             }
         }
 
-        foreach (var managedGroup in managedGroups.Values)
+        foreach (var managedGroup in caseInsensitiveManagedGroups.Values)
         {
             if (existingUser.AssignedGroupIds.Contains(managedGroup.Id) && !desiredGroups.Contains(managedGroup.DisplayName))
             {
@@ -142,16 +165,18 @@ public sealed class IdentityReconciliationService
     private static async Task<UserPrincipalName> ResolveAvailableUpnAsync(
         string slug,
         string domain,
-        Func<UserPrincipalName, Task<bool>> isAvailable)
+        Func<UserPrincipalName, CancellationToken, Task<bool>> isAvailable,
+        CancellationToken ct)
     {
         var baseUpn = UserPrincipalName.Create($"{slug}@{domain}").Value;
-        if (await isAvailable(baseUpn)) return baseUpn;
+        if (await isAvailable(baseUpn, ct)) return baseUpn;
 
         int counter = 2;
         while (counter < 1000)
         {
+            ct.ThrowIfCancellationRequested();
             var next = UserPrincipalName.Create($"{slug}{counter}@{domain}").Value;
-            if (await isAvailable(next)) return next;
+            if (await isAvailable(next, ct)) return next;
             counter++;
         }
 
