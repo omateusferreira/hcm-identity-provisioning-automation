@@ -184,6 +184,13 @@ To protect administrative, external, and ad-hoc groups created in the Entra tena
    - Explicit registration in `rules.json`.
 2. The reconciler **never removes** a user from any group outside this scope. Manual assignments to unmanaged groups (e.g., `SG-AzureAdmins`, `All-Company`) remain untouched.
 
+### 5.3 Missing Managed Group Handling Policy
+
+The engine follows a **Pre-Existing Groups** model:
+- Security groups in Entra ID must be pre-provisioned by directory administrators.
+- If a group resolved by `rules.json` (e.g., `grp-iam-finance`) is not found in `IIdentityStore`, the engine emits a structured warning (`WARNING_MANAGED_GROUP_NOT_FOUND`) and skips that specific group assignment for the employee.
+- The remainder of the employee reconciliation (user creation, profile update, other valid group memberships) proceeds without disruption.
+
 ---
 
 ## 6. Security Defenses & Resiliency
@@ -196,9 +203,12 @@ To defend against corrupt data, empty payloads, or upstream API outages flagging
     $$\text{DisablementRate} = \frac{\text{Count}(\text{DisableActions})}{\text{BatchSize}}$$
   - If $\text{DisablementRate} > \text{MaxDisablementPercentage}$ (default: `10%`) OR $\text{Count} > \text{MaxDisablementCount}$ (default: `25`):
     - The circuit breaker **trips**.
-    - All destructive actions in the batch are halted.
+    - All destructive actions in the batch (`DisableAccountAction`, `RevokeSessionsAction`) are halted.
     - An immediate critical alert (`CRITICAL_AUDIT_BREAKER_TRIPPED`) is logged.
-    - Non-destructive operations (creating new joiners) can either be preserved or halted based on configuration.
+    - Governed by `CircuitBreakerSettings`:
+      - `MaxDisablementPercentage` (double, default: `10.0`)
+      - `MaxDisablementCount` (int, default: `25`)
+      - `HaltAllOperationsOnTrip` (bool, default: `false`): when `false`, non-destructive operations (creating joiners, updating names) proceed while destructive mutations are halted; when `true`, the entire batch execution is halted.
 
 ### 6.2 Temporary Password Generation & Delivery
 
@@ -275,9 +285,9 @@ The engine processes HCM records in pages (`PAGE_SIZE = 50`):
 
 ## 9. Connector Ecosystem & Synthetic Fixtures
 
-### 9.1 Open-Source Contributor Contract (`IHcmConnector`)
+### 9.1 Open-Source Contributor Contract (`IHcmConnector`) & Dependency Injection
 
-Any third-party HCM can be supported by implementing:
+The core engine (`Domain` and `Application`) is strictly connector-agnostic and depends solely on the port:
 ```csharp
 public interface IHcmConnector
 {
@@ -288,7 +298,16 @@ public interface IHcmConnector
 }
 ```
 
-A dedicated guide (`docs/connectors-guide.md`) documents how to author and register new adapters with `IServiceCollection`.
+#### Composition Root Strategy
+Connector selection is strictly handled at the **Composition Root** via standard .NET Dependency Injection (`IServiceCollection`), adhering to the Open-Closed Principle (OCP) and Dependency Inversion Principle (DIP):
+- **Infrastructure DI Extensions:** `Infrastructure` exposes modular registration helpers:
+  - `services.AddSyntheticHcmConnector(options => ...)`
+  - `services.AddGenericRestHcmConnector(options => ...)`
+  - `services.AddInMemoryIdentityStore()`
+  - `services.AddEntraIdGraphAdapter(options => ...)`
+- **CLI (`HcmIdentityProvisioning.Cli`):** By default, configures `AddSyntheticHcmConnector()` and `AddInMemoryIdentityStore()` in its `Program.cs`, serving as an immediate, self-contained sandbox for audits, dry-runs, and rule evaluations without requiring Azure credentials.
+- **Azure Functions (`HcmIdentityProvisioning.Functions`):** Registers production adapters (`AddGenericRestHcmConnector()` and `AddEntraIdGraphAdapter()`) in its `Program.cs`.
+- **Third-Party Integrations:** Any organization or community contributor can implement `IHcmConnector` (e.g., TOTVS, Workday, SAP) and register it in their host's `Program.cs` without modifying the core engine. A dedicated guide (`docs/connectors-guide.md`) documents this contract.
 
 ### 9.2 Synthetic Fixture Catalog (`fixtures/synthetic-employees.json`)
 
