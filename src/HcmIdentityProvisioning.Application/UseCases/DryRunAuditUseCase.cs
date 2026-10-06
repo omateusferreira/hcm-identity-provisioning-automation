@@ -68,7 +68,7 @@ public sealed class DryRunAuditUseCase
                 batchActions.AddRange(actions);
             }
 
-            if (_circuitBreaker.ShouldTrip(paged.Items.Count, batchActions, out var reason))
+            if (!tripped && _circuitBreaker.ShouldTrip(paged.Items.Count, batchActions, out var reason))
             {
                 tripped = true;
                 breakerMsg = reason;

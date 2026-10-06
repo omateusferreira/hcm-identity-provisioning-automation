@@ -71,12 +71,19 @@ public sealed class ReconcileBatchUseCase
                 batchActions.AddRange(actions);
             }
 
-            if (_circuitBreaker.ShouldTrip(paged.Items.Count, batchActions, out var reason))
+            if (!tripped && _circuitBreaker.ShouldTrip(paged.Items.Count, batchActions, out var reason))
             {
                 tripped = true;
                 breakerMsg = reason;
                 _logger.LogCritical("CIRCUIT BREAKER TRIPPED: {Reason}", reason);
+            }
+            else if (tripped)
+            {
+                _logger.LogWarning("CIRCUIT BREAKER: Suppressing destructive actions on page {Page} due to prior trip", page);
+            }
 
+            if (tripped)
+            {
                 if (_settings.HaltAllOperationsOnTrip)
                 {
                     break;

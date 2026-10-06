@@ -272,4 +272,73 @@ public class ReconcileBatchUseCaseTests
             Arg.Any<CancellationToken>()
         );
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenPage1Trips_Page2AlsoSuppressesDestructiveActions()
+    {
+        var connector = Substitute.For<IHcmConnector>();
+        var store = Substitute.For<IIdentityStore>();
+        var rules = Substitute.For<IRulesEngine>();
+        var pwdGen = Substitute.For<ISecurePasswordGenerator>();
+        var breaker = Substitute.For<ICircuitBreaker>();
+        var delivery = Substitute.For<ICredentialDeliveryService>();
+
+        var emp1 = new Employee(EmployeeId.Create("E1").Value, "User 1", EmployeeStatus.Inactive, "Dep", "Role", new Dictionary<string, string>());
+        var emp2 = new Employee(EmployeeId.Create("E2").Value, "User 2", EmployeeStatus.Inactive, "Dep", "Role", new Dictionary<string, string>());
+        var emp3 = new Employee(EmployeeId.Create("E3").Value, "User 3 Renamed", EmployeeStatus.Active, "Dep", "Role", new Dictionary<string, string>());
+
+        var existing1 = new EntraUser(Guid.NewGuid(), emp1.Id, UserPrincipalName.Create("user1@corp.com").Value, "User 1", true, new HashSet<Guid>());
+        var existing2 = new EntraUser(Guid.NewGuid(), emp2.Id, UserPrincipalName.Create("user2@corp.com").Value, "User 2", true, new HashSet<Guid>());
+        var existing3 = new EntraUser(Guid.NewGuid(), emp3.Id, UserPrincipalName.Create("user3@corp.com").Value, "User 3", true, new HashSet<Guid>());
+
+        var paged1 = new PagedResult<Employee>(new[] { emp1 }, 1, 50, 3, true);
+        var paged2 = new PagedResult<Employee>(new[] { emp2, emp3 }, 2, 50, 3, false);
+
+        connector.GetEmployeesPageAsync(1, 50, Arg.Any<CancellationToken>()).Returns(paged1);
+        connector.GetEmployeesPageAsync(2, 50, Arg.Any<CancellationToken>()).Returns(paged2);
+
+        store.GetUsersByEmployeeIdsAsync(Arg.Is<IEnumerable<EmployeeId>>(ids => ids.Contains(emp1.Id)), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<EmployeeId, EntraUser> { [emp1.Id] = existing1 });
+        store.GetUsersByEmployeeIdsAsync(Arg.Is<IEnumerable<EmployeeId>>(ids => ids.Contains(emp2.Id)), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<EmployeeId, EntraUser> { [emp2.Id] = existing2, [emp3.Id] = existing3 });
+
+        store.GetManagedGroupsAsync(Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ManagedGroup>());
+        rules.EvaluateDesiredGroupsAsync(Arg.Any<Employee>(), Arg.Any<CancellationToken>())
+            .Returns(new HashSet<string>());
+
+        // Breaker trips on page 1 (batch size 1), but does NOT trip on page 2 (batch size 2)
+        breaker.ShouldTrip(1, Arg.Any<IReadOnlyList<Domain.Actions.DeltaAction>>(), out Arg.Any<string>())
+            .Returns(x => { x[2] = "Page 1 tripped"; return true; });
+        breaker.ShouldTrip(2, Arg.Any<IReadOnlyList<Domain.Actions.DeltaAction>>(), out Arg.Any<string>())
+            .Returns(false);
+
+        var reconciler = new IdentityReconciliationService(rules, pwdGen);
+        var settings = new SyncSettings { TenantDomain = "corp.com", HaltAllOperationsOnTrip = false };
+
+        var useCase = new ReconcileBatchUseCase(
+            connector,
+            store,
+            reconciler,
+            breaker,
+            delivery,
+            settings,
+            NullLogger<ReconcileBatchUseCase>.Instance
+        );
+
+        var report = await useCase.ExecuteAsync();
+
+        report.CircuitBreakerTripped.Should().BeTrue();
+        report.CircuitBreakerMessage.Should().Be("Page 1 tripped");
+        report.DisabledCount.Should().Be(0, "destructive actions should remain suppressed on page 2 even if page 2 breaker did not trip alone");
+        report.SessionsRevokedCount.Should().Be(0);
+        report.UpdatedCount.Should().Be(1, "non-destructive actions on page 2 should still be processed");
+
+        await store.Received(1).ApplyBatchMutationsAsync(
+            Arg.Is<IEnumerable<Domain.Actions.DeltaAction>>(actions =>
+                actions.All(a => !(a is Domain.Actions.DisableAccountAction) && !(a is Domain.Actions.RevokeSessionsAction)) &&
+                actions.Any(a => a is Domain.Actions.UpdateDisplayNameAction)),
+            Arg.Any<CancellationToken>()
+        );
+    }
 }

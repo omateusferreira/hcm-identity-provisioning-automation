@@ -172,4 +172,60 @@ public class DryRunAuditUseCaseTests
         await connector.Received(1).GetEmployeesPageAsync(2, 50, Arg.Any<CancellationToken>());
         await store.DidNotReceive().ApplyBatchMutationsAsync(Arg.Any<IEnumerable<Domain.Actions.DeltaAction>>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenPage1Trips_RetainsTrippedStateAcrossSubsequentPages()
+    {
+        var connector = Substitute.For<IHcmConnector>();
+        var store = Substitute.For<IIdentityStore>();
+        var rules = Substitute.For<IRulesEngine>();
+        var pwdGen = Substitute.For<ISecurePasswordGenerator>();
+        var breaker = Substitute.For<ICircuitBreaker>();
+
+        rules.EvaluateDesiredGroupsAsync(Arg.Any<Employee>(), Arg.Any<CancellationToken>())
+            .Returns(new HashSet<string>());
+        store.GetManagedGroupsAsync(Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ManagedGroup>());
+
+        var emp1 = new Employee(EmployeeId.Create("E1").Value, "User 1", EmployeeStatus.Inactive, "IT", "Dev", new Dictionary<string, string>());
+        var emp2 = new Employee(EmployeeId.Create("E2").Value, "User 2", EmployeeStatus.Inactive, "IT", "Dev", new Dictionary<string, string>());
+
+        var user1 = new EntraUser(Guid.NewGuid(), emp1.Id, UserPrincipalName.Create("user1@corp.com").Value, "User 1", true, new HashSet<Guid>());
+        var user2 = new EntraUser(Guid.NewGuid(), emp2.Id, UserPrincipalName.Create("user2@corp.com").Value, "User 2", true, new HashSet<Guid>());
+
+        var paged1 = new PagedResult<Employee>(new[] { emp1 }, 1, 50, 2, true);
+        var paged2 = new PagedResult<Employee>(new[] { emp2 }, 2, 50, 2, false);
+
+        connector.GetEmployeesPageAsync(1, 50, Arg.Any<CancellationToken>()).Returns(paged1);
+        connector.GetEmployeesPageAsync(2, 50, Arg.Any<CancellationToken>()).Returns(paged2);
+
+        store.GetUsersByEmployeeIdsAsync(Arg.Is<IEnumerable<EmployeeId>>(ids => ids.Contains(emp1.Id)), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<EmployeeId, EntraUser> { [emp1.Id] = user1 });
+        store.GetUsersByEmployeeIdsAsync(Arg.Is<IEnumerable<EmployeeId>>(ids => ids.Contains(emp2.Id)), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<EmployeeId, EntraUser> { [emp2.Id] = user2 });
+
+        breaker.ShouldTrip(1, Arg.Any<IReadOnlyList<Domain.Actions.DeltaAction>>(), out Arg.Any<string>())
+            .Returns(x => { x[2] = "Page 1 tripped"; return true; });
+        breaker.ShouldTrip(2, Arg.Any<IReadOnlyList<Domain.Actions.DeltaAction>>(), out Arg.Any<string>())
+            .Returns(false);
+
+        var reconciler = new IdentityReconciliationService(rules, pwdGen);
+        var settings = new SyncSettings { TenantDomain = "corp.com" };
+
+        var useCase = new DryRunAuditUseCase(
+            connector,
+            store,
+            reconciler,
+            breaker,
+            settings,
+            NullLogger<DryRunAuditUseCase>.Instance
+        );
+
+        var report = await useCase.ExecuteAsync();
+
+        report.CircuitBreakerTripped.Should().BeTrue();
+        report.CircuitBreakerMessage.Should().Be("Page 1 tripped");
+        report.TotalProcessed.Should().Be(2);
+        report.DisabledCount.Should().Be(2, "dry run audits all proposed actions across pages");
+    }
 }
