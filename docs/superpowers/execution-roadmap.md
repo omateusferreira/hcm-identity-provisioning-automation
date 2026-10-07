@@ -1,7 +1,7 @@
 # Macro Execution Roadmap: HCM → Microsoft Entra ID Provisioning Engine
 
 - **Projeto:** HCM to Microsoft Entra ID Lifecycle & Provisioning Automation
-- **Status:** Ciclos 1, 2 & 3 Concluídos e Validados (173 testes) | Todos os Ciclos Concluídos
+- **Status:** Ciclos 1, 2, 3 & Hardening/Packaging v1.1.0 Concluídos e Validados (209 testes) | Produção & NuGet Ready
 - **Arquitetura Base:** [`docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md`](docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md)
 - **Runtime:** .NET 10 (`net10.0`), C# 14
 
@@ -48,6 +48,7 @@ flowchart TD
 | **Ciclo 1** | **Núcleo do Motor & CLI Sandbox** | Engine de reconciliação em memória + CLI funcional (`hcm-sync`) operando sobre 6 cenários de RH. Zero dependência externa. | [`docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md`](docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md) | **Concluído e Validado (123 testes)** |
 | **Ciclo 2** | **Adaptadores de Produção (Graph & REST)** | Implementação real do `IIdentityStore` (Microsoft Graph v5 via Managed Identity) e `IHcmConnector` (REST HTTP resiliente). | [`docs/superpowers/plans/2026-10-06-cycle-2-production-adapters.md`](docs/superpowers/plans/2026-10-06-cycle-2-production-adapters.md) | **Concluído e Validado (159 testes)** |
 | **Ciclo 3** | **Automação Serverless & Observabilidade** | Host Azure Functions (.NET Isolated), agendamento cron, webhook manual, envio seguro de credenciais e App Insights. | [`docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md`](docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md) | **Concluído e Validado (173 testes)** |
+| **Hardening & NuGet (v1.1.0)** | **Two-Stage Parallel Batching & Empacotamento NuGet** | Refatoração Two-Stage Parallel Batching no Graph Adapter, paginação anti-ciclos nos casos de uso, leitura mascarada de senhas e distribuição NuGet (`Domain`, `Application`, `Infrastructure`). | [`docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md`](docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md) | **Concluído e Validado (209 testes)** |
 
 ---
 
@@ -134,3 +135,5 @@ Ao término de qualquer ciclo:
 | **Plano de Implementação - Ciclo 1** | [`docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md`](docs/superpowers/plans/2026-10-05-hcm-entra-id-cycle-1-core-engine.md) | Plano passo a passo para execução imediata do Ciclo 1. |
 | **Plano de Implementação - Ciclo 2** | [`docs/superpowers/plans/2026-10-06-cycle-2-production-adapters.md`](docs/superpowers/plans/2026-10-06-cycle-2-production-adapters.md) | Plano fino para os adaptadores de produção. |
 | **Plano de Implementação - Ciclo 3** | [`docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md`](docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md) | Plano fino para Azure Functions, telemetria e validação final. |
+| **Especificação Técnica - Hardening & NuGet** | [`docs/superpowers/specs/2026-10-07-graph-batch-two-stage-and-nuget-packaging-design.md`](docs/superpowers/specs/2026-10-07-graph-batch-two-stage-and-nuget-packaging-design.md) | Design de Two-Stage Parallel Batching, paginação defensiva, CLI masking e distribuição NuGet. |
+| **Plano de Implementação - Hardening & NuGet** | [`docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md`](docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md) | Plano fino de execução para Two-Stage Parallel Batching e empacotamento NuGet v1.1.0. |
