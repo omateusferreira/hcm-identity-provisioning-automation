@@ -314,64 +314,83 @@ public class EntraIdGraphAdapter : IIdentityStore
         }
 
         var batchSize = _options.MaxBatchSize > 0 ? _options.MaxBatchSize : 20;
-        _logger.LogInformation("Applying {Count} batch mutations chunked by {BatchSize}", actionList.Count, batchSize);
 
-        foreach (var chunk in actionList.Chunk(batchSize))
+        var directActions = new List<DeltaAction>();
+        var pendingJoinerGroupActions = new List<AddGroupMemberAction>();
+
+        foreach (var action in actionList)
         {
-            var shouldFastExit = await ProcessBatchChunkAsync(chunk, ct);
-            if (shouldFastExit)
+            if (action is AddGroupMemberAction addGroup && addGroup.GraphId == Guid.Empty)
             {
-                return;
+                pendingJoinerGroupActions.Add(addGroup);
+            }
+            else
+            {
+                directActions.Add(action);
+            }
+        }
+
+        var resolvedUserGuids = new Dictionary<EmployeeId, Guid>();
+
+        if (directActions.Count > 0)
+        {
+            _logger.LogInformation("Applying Stage 1: {Count} direct batch mutations chunked by {BatchSize}", directActions.Count, batchSize);
+            foreach (var chunk in directActions.Chunk(batchSize))
+            {
+                var shouldFastExit = await ProcessDirectBatchChunkAsync(chunk, resolvedUserGuids, ct);
+                if (shouldFastExit)
+                {
+                    return;
+                }
+            }
+        }
+
+        if (pendingJoinerGroupActions.Count > 0)
+        {
+            var resolvedGroupActions = new List<DeltaAction>();
+            foreach (var pending in pendingJoinerGroupActions)
+            {
+                if (pending.EmployeeId != null && resolvedUserGuids.TryGetValue(pending.EmployeeId, out var userGuid))
+                {
+                    resolvedGroupActions.Add(new AddGroupMemberAction(userGuid, pending.GroupId, pending.GroupName, pending.EmployeeId));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Unable to resolve GraphId for pending group membership in group {GroupId} ({GroupName}). Action skipped.",
+                        pending.GroupId,
+                        pending.GroupName);
+                }
+            }
+
+            if (resolvedGroupActions.Count > 0)
+            {
+                _logger.LogInformation("Applying Stage 2: {Count} pending group member mutations chunked by {BatchSize}", resolvedGroupActions.Count, batchSize);
+                foreach (var chunk in resolvedGroupActions.Chunk(batchSize))
+                {
+                    var shouldFastExit = await ProcessGroupBatchChunkAsync(chunk, ct);
+                    if (shouldFastExit)
+                    {
+                        return;
+                    }
+                }
             }
         }
     }
 
-    private async Task<bool> ProcessBatchChunkAsync(IReadOnlyList<DeltaAction> chunk, CancellationToken ct)
+    private async Task<bool> ProcessDirectBatchChunkAsync(
+        IReadOnlyList<DeltaAction> chunk,
+        Dictionary<EmployeeId, Guid> resolvedUserGuids,
+        CancellationToken ct)
     {
         var batch = new BatchRequestContentCollection(_graphClient);
         var actionByStepId = new Dictionary<string, DeltaAction>();
-        string? lastCreateUserStepId = null;
 
         foreach (var action in chunk)
         {
-            if (action is AddGroupMemberAction addGroup && addGroup.GraphId == Guid.Empty)
-            {
-                if (string.IsNullOrWhiteSpace(lastCreateUserStepId))
-                {
-                    _logger.LogWarning(
-                        "AddGroupMemberAction for group {GroupId} specifies Guid.Empty without a preceding CreateUserAction in the batch chunk. Handling gracefully.",
-                        addGroup.GroupId);
-                    var reqInfo = CreateRequestInformationForAction(action, null);
-                    var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
-                    actionByStepId[stepId] = action;
-                }
-                else
-                {
-                    var reqInfo = CreateRequestInformationForAction(action, lastCreateUserStepId);
-                    var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
-                    actionByStepId[stepId] = action;
-
-                    if (batch.BatchRequestSteps.TryGetValue(stepId, out var batchStep))
-                    {
-                        batchStep.DependsOn ??= new List<string>();
-                        if (!batchStep.DependsOn.Contains(lastCreateUserStepId))
-                        {
-                            batchStep.DependsOn.Add(lastCreateUserStepId);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                var reqInfo = CreateRequestInformationForAction(action);
-                var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
-                actionByStepId[stepId] = action;
-
-                if (action is CreateUserAction)
-                {
-                    lastCreateUserStepId = stepId;
-                }
-            }
+            var reqInfo = CreateRequestInformationForAction(action);
+            var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+            actionByStepId[stepId] = action;
         }
 
         var batchResponse = await _graphClient.Batch.PostAsync(batch, ct);
@@ -380,6 +399,7 @@ public class EntraIdGraphAdapter : IIdentityStore
         var throttledActions = new List<DeltaAction>();
         int maxRetryAfterSeconds = 0;
         var unhandledFailures = new List<(string StepId, DeltaAction Action, HttpStatusCode StatusCode, string? ErrorDetails)>();
+        var conflictedEmployeeIds = new List<EmployeeId>();
 
         foreach (var (stepId, action) in actionByStepId)
         {
@@ -390,6 +410,39 @@ public class EntraIdGraphAdapter : IIdentityStore
 
             if (IsSuccessStatusCode(statusCode))
             {
+                if (action is CreateUserAction create)
+                {
+                    try
+                    {
+                        var subResponse = await batchResponse.GetResponseByIdAsync(stepId);
+                        if (subResponse?.Content != null)
+                        {
+                            var responseJson = await subResponse.Content.ReadAsStringAsync(ct);
+                            if (!string.IsNullOrWhiteSpace(responseJson))
+                            {
+                                using var doc = JsonDocument.Parse(responseJson);
+                                if (doc.RootElement.TryGetProperty("id", out var idProp) &&
+                                    Guid.TryParse(idProp.GetString(), out var userGuid))
+                                {
+                                    resolvedUserGuids[create.Employee.Id] = userGuid;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse user ID from CreateUser response for employee {EmployeeId}", create.Employee.Id);
+                    }
+                }
+                continue;
+            }
+
+            if (action is CreateUserAction createConflict && statusCode == HttpStatusCode.Conflict)
+            {
+                _logger.LogInformation(
+                    "User for employee {EmployeeId} already exists in Entra ID (409 Conflict). Resolving existing GraphId.",
+                    createConflict.Employee.Id);
+                conflictedEmployeeIds.Add(createConflict.Employee.Id);
                 continue;
             }
 
@@ -461,6 +514,15 @@ public class EntraIdGraphAdapter : IIdentityStore
             unhandledFailures.Add((stepId, action, statusCode, friendlyMessage ?? errorDetails));
         }
 
+        if (conflictedEmployeeIds.Count > 0)
+        {
+            var existingUsers = await GetUsersByEmployeeIdsAsync(conflictedEmployeeIds, ct);
+            foreach (var (empId, entraUser) in existingUsers)
+            {
+                resolvedUserGuids[empId] = entraUser.GraphId;
+            }
+        }
+
         if (throttledActions.Count > 0)
         {
             if (maxRetryAfterSeconds > _options.MaxImmediateRetryDelaySeconds)
@@ -474,7 +536,7 @@ public class EntraIdGraphAdapter : IIdentityStore
             var delaySeconds = Math.Max(1, maxRetryAfterSeconds);
             await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct);
 
-            var retrySuccess = await RetryThrottledActionsAsync(throttledActions, ct);
+            var retrySuccess = await RetryThrottledActionsAsync(throttledActions, resolvedUserGuids, ct);
             if (!retrySuccess)
             {
                 _logger.LogWarning(
@@ -496,45 +558,155 @@ public class EntraIdGraphAdapter : IIdentityStore
         return false;
     }
 
-    private async Task<bool> RetryThrottledActionsAsync(IReadOnlyList<DeltaAction> actions, CancellationToken ct)
+    private async Task<bool> ProcessGroupBatchChunkAsync(IReadOnlyList<DeltaAction> chunk, CancellationToken ct)
     {
         var batch = new BatchRequestContentCollection(_graphClient);
         var actionByStepId = new Dictionary<string, DeltaAction>();
-        string? lastCreateUserStepId = null;
 
-        foreach (var action in actions)
+        foreach (var action in chunk)
         {
-            if (action is AddGroupMemberAction addGroup && addGroup.GraphId == Guid.Empty)
-            {
-                var reqInfo = CreateRequestInformationForAction(action, lastCreateUserStepId);
-                var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
-                actionByStepId[stepId] = action;
-
-                if (!string.IsNullOrWhiteSpace(lastCreateUserStepId) &&
-                    batch.BatchRequestSteps.TryGetValue(stepId, out var batchStep))
-                {
-                    batchStep.DependsOn ??= new List<string>();
-                    if (!batchStep.DependsOn.Contains(lastCreateUserStepId))
-                    {
-                        batchStep.DependsOn.Add(lastCreateUserStepId);
-                    }
-                }
-            }
-            else
-            {
-                var reqInfo = CreateRequestInformationForAction(action);
-                var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
-                actionByStepId[stepId] = action;
-
-                if (action is CreateUserAction)
-                {
-                    lastCreateUserStepId = stepId;
-                }
-            }
+            var reqInfo = CreateRequestInformationForAction(action);
+            var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+            actionByStepId[stepId] = action;
         }
 
         var batchResponse = await _graphClient.Batch.PostAsync(batch, ct);
         var statusCodes = await batchResponse.GetResponsesStatusCodesAsync();
+
+        var throttledActions = new List<DeltaAction>();
+        int maxRetryAfterSeconds = 0;
+        var unhandledFailures = new List<(string StepId, DeltaAction Action, HttpStatusCode StatusCode, string? ErrorDetails)>();
+
+        foreach (var (stepId, action) in actionByStepId)
+        {
+            if (!statusCodes.TryGetValue(stepId, out var statusCode))
+            {
+                continue;
+            }
+
+            if (IsSuccessStatusCode(statusCode) || IsIdempotentGroupSuccess(action, statusCode))
+            {
+                if (!IsSuccessStatusCode(statusCode))
+                {
+                    _logger.LogDebug(
+                        "Idempotent group failure tolerated for action {ActionName} on target {Target} (Status: {StatusCode})",
+                        action.ActionName, action.TargetGraphId, statusCode);
+                }
+                continue;
+            }
+
+            if (statusCode == HttpStatusCode.TooManyRequests)
+            {
+                var subResponse = await batchResponse.GetResponseByIdAsync(stepId);
+                var retryAfter = ExtractRetryAfterSeconds(subResponse);
+                if (retryAfter <= 0)
+                {
+                    retryAfter = 1;
+                }
+
+                if (retryAfter > maxRetryAfterSeconds)
+                {
+                    maxRetryAfterSeconds = retryAfter;
+                }
+
+                throttledActions.Add(action);
+                continue;
+            }
+
+            string? errorDetails = null;
+            try
+            {
+                var subResponse = await batchResponse.GetResponseByIdAsync(stepId);
+                if (subResponse?.Content != null)
+                {
+                    errorDetails = await subResponse.Content.ReadAsStringAsync(ct);
+                }
+            }
+            catch
+            {
+                // Ignore extraction failures
+            }
+
+            string? friendlyMessage = null;
+            if (!string.IsNullOrWhiteSpace(errorDetails))
+            {
+                try
+                {
+                    using var jsonDoc = JsonDocument.Parse(errorDetails);
+                    if (jsonDoc.RootElement.TryGetProperty("error", out var errorProp) &&
+                        errorProp.TryGetProperty("message", out var msgProp))
+                    {
+                        friendlyMessage = msgProp.GetString();
+                    }
+                }
+                catch
+                {
+                    friendlyMessage = errorDetails;
+                }
+            }
+
+            var detailInfo = !string.IsNullOrWhiteSpace(friendlyMessage) ? $" Details: {friendlyMessage}" : string.Empty;
+
+            _logger.LogError(
+                "ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {StepId} for action {ActionName} failed with status {StatusCode}.{DetailInfo}",
+                stepId, action.ActionName, statusCode, detailInfo);
+            unhandledFailures.Add((stepId, action, statusCode, friendlyMessage ?? errorDetails));
+        }
+
+        if (throttledActions.Count > 0)
+        {
+            if (maxRetryAfterSeconds > _options.MaxImmediateRetryDelaySeconds)
+            {
+                _logger.LogWarning(
+                    "WARNING_GRAPH_THROTTLE_FAST_EXIT: Long throttle detected (Retry-After: {RetryAfter}s > {MaxDelay}s). Fast-exiting without blocking.",
+                    maxRetryAfterSeconds, _options.MaxImmediateRetryDelaySeconds);
+                return true;
+            }
+
+            var delaySeconds = Math.Max(1, maxRetryAfterSeconds);
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct);
+
+            var retrySuccess = await RetryThrottledActionsAsync(throttledActions, null, ct);
+            if (!retrySuccess)
+            {
+                _logger.LogWarning(
+                    "WARNING_GRAPH_THROTTLE_FAST_EXIT: Subrequest retry failed or re-throttled. Fast-exiting without blocking.");
+                return true;
+            }
+        }
+
+        if (unhandledFailures.Count > 0)
+        {
+            var first = unhandledFailures[0];
+            var detailText = !string.IsNullOrWhiteSpace(first.ErrorDetails) ? $" Reason: {first.ErrorDetails}" : string.Empty;
+            throw new HttpRequestException(
+                $"ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {first.StepId} for action {first.Action.ActionName} failed with status {first.StatusCode}.{detailText}",
+                null,
+                first.StatusCode);
+        }
+
+        return false;
+    }
+
+    private async Task<bool> RetryThrottledActionsAsync(
+        IReadOnlyList<DeltaAction> actions,
+        Dictionary<EmployeeId, Guid>? resolvedUserGuids,
+        CancellationToken ct)
+    {
+        var batch = new BatchRequestContentCollection(_graphClient);
+        var actionByStepId = new Dictionary<string, DeltaAction>();
+
+        foreach (var action in actions)
+        {
+            var reqInfo = CreateRequestInformationForAction(action);
+            var stepId = await batch.AddBatchRequestStepAsync(reqInfo);
+            actionByStepId[stepId] = action;
+        }
+
+        var batchResponse = await _graphClient.Batch.PostAsync(batch, ct);
+        var statusCodes = await batchResponse.GetResponsesStatusCodesAsync();
+
+        var conflictedEmployeeIds = new List<EmployeeId>();
 
         foreach (var (stepId, action) in actionByStepId)
         {
@@ -543,7 +715,42 @@ public class EntraIdGraphAdapter : IIdentityStore
                 return false;
             }
 
-            if (IsSuccessStatusCode(statusCode) || IsIdempotentGroupSuccess(action, statusCode))
+            if (IsSuccessStatusCode(statusCode))
+            {
+                if (action is CreateUserAction create && resolvedUserGuids != null)
+                {
+                    try
+                    {
+                        var subResponse = await batchResponse.GetResponseByIdAsync(stepId);
+                        if (subResponse?.Content != null)
+                        {
+                            var responseJson = await subResponse.Content.ReadAsStringAsync(ct);
+                            if (!string.IsNullOrWhiteSpace(responseJson))
+                            {
+                                using var doc = JsonDocument.Parse(responseJson);
+                                if (doc.RootElement.TryGetProperty("id", out var idProp) &&
+                                    Guid.TryParse(idProp.GetString(), out var userGuid))
+                                {
+                                    resolvedUserGuids[create.Employee.Id] = userGuid;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse user ID from retried CreateUser response for employee {EmployeeId}", create.Employee.Id);
+                    }
+                }
+                continue;
+            }
+
+            if (action is CreateUserAction createConflict && statusCode == HttpStatusCode.Conflict && resolvedUserGuids != null)
+            {
+                conflictedEmployeeIds.Add(createConflict.Employee.Id);
+                continue;
+            }
+
+            if (IsIdempotentGroupSuccess(action, statusCode))
             {
                 continue;
             }
@@ -551,10 +758,19 @@ public class EntraIdGraphAdapter : IIdentityStore
             return false;
         }
 
+        if (conflictedEmployeeIds.Count > 0 && resolvedUserGuids != null)
+        {
+            var existingUsers = await GetUsersByEmployeeIdsAsync(conflictedEmployeeIds, ct);
+            foreach (var (empId, entraUser) in existingUsers)
+            {
+                resolvedUserGuids[empId] = entraUser.GraphId;
+            }
+        }
+
         return true;
     }
 
-    private RequestInformation CreateRequestInformationForAction(DeltaAction action, string? relativeUserStepId = null) => action switch
+    private RequestInformation CreateRequestInformationForAction(DeltaAction action) => action switch
     {
         CreateUserAction create => _graphClient.Users.ToPostRequestInformation(new User
         {
@@ -589,9 +805,7 @@ public class EntraIdGraphAdapter : IIdentityStore
 
         AddGroupMemberAction addGroup => _graphClient.Groups[addGroup.GroupId.ToString()].Members.Ref.ToPostRequestInformation(new ReferenceCreate
         {
-            OdataId = addGroup.GraphId == Guid.Empty && !string.IsNullOrWhiteSpace(relativeUserStepId)
-                ? $"${relativeUserStepId}"
-                : $"https://graph.microsoft.com/v1.0/directoryObjects/{addGroup.GraphId}"
+            OdataId = $"https://graph.microsoft.com/v1.0/directoryObjects/{addGroup.GraphId}"
         }),
 
         RemoveGroupMemberAction removeGroup => _graphClient.Groups[removeGroup.GroupId.ToString()].Members[removeGroup.GraphId.ToString()].Ref.ToDeleteRequestInformation(),

@@ -198,8 +198,6 @@ public sealed class ProductionPipelineIntegrationTests
                     var id = r.GetProperty("id").GetString()!;
                     var method = r.GetProperty("method").GetString()!;
                     var url = r.GetProperty("url").GetString()!;
-                    subResponses.Add(new MockBatchSubResponse(id, 200));
-
                     var trimmedUrl = url.TrimStart('/');
                     var segments = trimmedUrl.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
@@ -220,68 +218,74 @@ public sealed class ProductionPipelineIntegrationTests
                             AccountEnabled = true
                         };
                         directory.Users[lastCreatedUser.Id] = lastCreatedUser;
+                        subResponses.Add(new MockBatchSubResponse(id, 201, Body: new { id = lastCreatedUser.Id.ToString() }));
                     }
-                    else if (string.Equals(method, "PATCH", StringComparison.OrdinalIgnoreCase) &&
-                             segments.Length == 2 &&
-                             string.Equals(segments[0], "users", StringComparison.OrdinalIgnoreCase) &&
-                             Guid.TryParse(segments[1], out var patchUserId))
+                    else
                     {
-                        if (directory.Users.TryGetValue(patchUserId, out var user))
+                        subResponses.Add(new MockBatchSubResponse(id, 200));
+
+                        if (string.Equals(method, "PATCH", StringComparison.OrdinalIgnoreCase) &&
+                            segments.Length == 2 &&
+                            string.Equals(segments[0], "users", StringComparison.OrdinalIgnoreCase) &&
+                            Guid.TryParse(segments[1], out var patchUserId))
                         {
-                            var bodyElem = r.GetProperty("body");
-                            if (bodyElem.TryGetProperty("accountEnabled", out var enabledElem))
+                            if (directory.Users.TryGetValue(patchUserId, out var user))
                             {
-                                user.AccountEnabled = enabledElem.GetBoolean();
-                            }
-                            if (bodyElem.TryGetProperty("displayName", out var nameElem))
-                            {
-                                user.DisplayName = nameElem.GetString() ?? user.DisplayName;
+                                var bodyElem = r.GetProperty("body");
+                                if (bodyElem.TryGetProperty("accountEnabled", out var enabledElem))
+                                {
+                                    user.AccountEnabled = enabledElem.GetBoolean();
+                                }
+                                if (bodyElem.TryGetProperty("displayName", out var nameElem))
+                                {
+                                    user.DisplayName = nameElem.GetString() ?? user.DisplayName;
+                                }
                             }
                         }
-                    }
-                    else if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
-                             segments.Length == 4 &&
-                             string.Equals(segments[0], "groups", StringComparison.OrdinalIgnoreCase) &&
-                             Guid.TryParse(segments[1], out var addGroupId) &&
-                             string.Equals(segments[2], "members", StringComparison.OrdinalIgnoreCase) &&
-                             string.Equals(segments[3], "$ref", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var bodyElem = r.GetProperty("body");
-                        if (bodyElem.TryGetProperty("@odata.id", out var odataElem))
+                        else if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase) &&
+                                 segments.Length == 4 &&
+                                 string.Equals(segments[0], "groups", StringComparison.OrdinalIgnoreCase) &&
+                                 Guid.TryParse(segments[1], out var addGroupId) &&
+                                 string.Equals(segments[2], "members", StringComparison.OrdinalIgnoreCase) &&
+                                 string.Equals(segments[3], "$ref", StringComparison.OrdinalIgnoreCase))
                         {
-                            var odataId = odataElem.GetString() ?? string.Empty;
-                            if (odataId.StartsWith('$') && lastCreatedUser != null)
+                            var bodyElem = r.GetProperty("body");
+                            if (bodyElem.TryGetProperty("@odata.id", out var odataElem))
                             {
-                                lastCreatedUser.MemberOfGroupIds.Add(addGroupId);
-                            }
-                            else
-                            {
-                                var lastSeg = odataId.Split('/').Last();
-                                if (Guid.TryParse(lastSeg, out var targetUserId))
+                                var odataId = odataElem.GetString() ?? string.Empty;
+                                if (odataId.StartsWith('$') && lastCreatedUser != null)
                                 {
-                                    if (targetUserId == Guid.Empty && lastCreatedUser != null)
+                                    lastCreatedUser.MemberOfGroupIds.Add(addGroupId);
+                                }
+                                else
+                                {
+                                    var lastSeg = odataId.Split('/').Last();
+                                    if (Guid.TryParse(lastSeg, out var targetUserId))
                                     {
-                                        lastCreatedUser.MemberOfGroupIds.Add(addGroupId);
-                                    }
-                                    else if (directory.Users.TryGetValue(targetUserId, out var user))
-                                    {
-                                        user.MemberOfGroupIds.Add(addGroupId);
+                                        if (targetUserId == Guid.Empty && lastCreatedUser != null)
+                                        {
+                                            lastCreatedUser.MemberOfGroupIds.Add(addGroupId);
+                                        }
+                                        else if (directory.Users.TryGetValue(targetUserId, out var user))
+                                        {
+                                            user.MemberOfGroupIds.Add(addGroupId);
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    else if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase) &&
-                             segments.Length == 5 &&
-                             string.Equals(segments[0], "groups", StringComparison.OrdinalIgnoreCase) &&
-                             Guid.TryParse(segments[1], out var remGroupId) &&
-                             string.Equals(segments[2], "members", StringComparison.OrdinalIgnoreCase) &&
-                             Guid.TryParse(segments[3], out var remUserId) &&
-                             string.Equals(segments[4], "$ref", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (directory.Users.TryGetValue(remUserId, out var user))
+                        else if (string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase) &&
+                                 segments.Length == 5 &&
+                                 string.Equals(segments[0], "groups", StringComparison.OrdinalIgnoreCase) &&
+                                 Guid.TryParse(segments[1], out var remGroupId) &&
+                                 string.Equals(segments[2], "members", StringComparison.OrdinalIgnoreCase) &&
+                                 Guid.TryParse(segments[3], out var remUserId) &&
+                                 string.Equals(segments[4], "$ref", StringComparison.OrdinalIgnoreCase))
                         {
-                            user.MemberOfGroupIds.Remove(remGroupId);
+                            if (directory.Users.TryGetValue(remUserId, out var user))
+                            {
+                                user.MemberOfGroupIds.Remove(remGroupId);
+                            }
                         }
                     }
                 }
@@ -435,30 +439,30 @@ public sealed class ProductionPipelineIntegrationTests
         pass1Report.GroupMembershipsAdded.Should().Be(7);
         pass1Report.GroupMembershipsRemoved.Should().Be(2);
 
-        // 4. Batch payload verification sent to Microsoft Graph API
-        directory.BatchRequestsReceived.Should().Be(1);
-        directory.CapturedBatchBodies.Should().HaveCount(1);
-        var batchBody = directory.CapturedBatchBodies[0];
+        // 4. Batch payload verification sent to Microsoft Graph API (Two-Stage Parallel Batching: Stage 1 + Stage 2)
+        directory.BatchRequestsReceived.Should().Be(2);
+        directory.CapturedBatchBodies.Should().HaveCount(2);
+        var allBatchBodies = string.Join("\n", directory.CapturedBatchBodies);
 
         // Scenario 1: Joiner Mariana Lima (EMP-001)
-        batchBody.Should().Contain("mariana.lima@company.onmicrosoft.com");
+        allBatchBodies.Should().Contain("mariana.lima@company.onmicrosoft.com");
 
         // Scenario 4: Homonym Mariana Lima (EMP-004) resolved with suffix 2
-        batchBody.Should().Contain("mariana.lima2@company.onmicrosoft.com");
+        allBatchBodies.Should().Contain("mariana.lima2@company.onmicrosoft.com");
 
         // Scenario 5: Diacritics José d'Ávila (EMP-005) sanitized to jose.davila
-        batchBody.Should().Contain("jose.davila@company.onmicrosoft.com");
+        allBatchBodies.Should().Contain("jose.davila@company.onmicrosoft.com");
 
         // Scenario 3: Leaver Beatriz Souza (EMP-003) disabled & sessions revoked
-        batchBody.Should().Contain($"/users/{directory.LeaverGraphId}");
-        batchBody.Should().Contain($"/users/{directory.LeaverGraphId}/revokeSignInSessions");
+        allBatchBodies.Should().Contain($"/users/{directory.LeaverGraphId}");
+        allBatchBodies.Should().Contain($"/users/{directory.LeaverGraphId}/revokeSignInSessions");
 
         // Scenario 2: Mover Rodrigo Alves (EMP-002) group transitions
-        batchBody.Should().Contain($"/groups/{directory.EngineeringGroupId}/members/{directory.MoverGraphId}/$ref");
-        batchBody.Should().Contain($"/groups/{directory.FinanceGroupId}/members/$ref");
+        allBatchBodies.Should().Contain($"/groups/{directory.EngineeringGroupId}/members/{directory.MoverGraphId}/$ref");
+        allBatchBodies.Should().Contain($"/groups/{directory.FinanceGroupId}/members/$ref");
 
         // Scenario 6: Idempotent No-Op Felipe Gomes (EMP-006) generated zero mutations for its ID
-        batchBody.Should().NotContain(directory.NoopGraphId.ToString());
+        allBatchBodies.Should().NotContain(directory.NoopGraphId.ToString());
 
         // Act - Pass 2: Strict Idempotency execution over unchanged sources
         var pass2Report = await useCase.ExecuteAsync();
@@ -477,8 +481,8 @@ public sealed class ProductionPipelineIntegrationTests
         pass2Report.CircuitBreakerTripped.Should().BeFalse();
 
         // STRICT IDEMPOTENCY: Graph batch endpoint received ZERO new mutation calls in Pass 2
-        directory.BatchRequestsReceived.Should().Be(1);
-        directory.CapturedBatchBodies.Should().HaveCount(1);
+        directory.BatchRequestsReceived.Should().Be(2);
+        directory.CapturedBatchBodies.Should().HaveCount(2);
 
         // Performance: Entire E2E reconciliation lifecycle completes in subseconds (< 1000ms)
         sw.ElapsedMilliseconds.Should().BeLessThan(1000);
