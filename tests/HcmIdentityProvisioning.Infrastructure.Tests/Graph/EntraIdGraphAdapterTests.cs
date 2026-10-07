@@ -736,4 +736,51 @@ public sealed class EntraIdGraphAdapterTests
         requestsArray[0].GetProperty("body").GetProperty("@odata.id").GetString()
             .Should().Be($"https://graph.microsoft.com/v1.0/directoryObjects/{Guid.Empty}");
     }
+
+    [Fact]
+    public async Task CreateManagedGroupAsync_WhenGroupDoesNotExist_PostsGroupAndReturnsNewManagedGroup()
+    {
+        // Arrange
+        var newGroupId = Guid.NewGuid();
+        _mockHandler.WhenMethodAndUrl(HttpMethod.Get, "/groups")
+            .RespondWithJson(JsonSerializer.Serialize(new { value = Array.Empty<object>() }));
+        _mockHandler.WhenMethodAndUrl(HttpMethod.Post, "/groups")
+            .RespondWithJson(JsonSerializer.Serialize(new
+            {
+                id = newGroupId.ToString(),
+                displayName = "grp-iam-new",
+                securityEnabled = true,
+                mailEnabled = false
+            }), HttpStatusCode.Created);
+
+        // Act
+        var result = await _sut.CreateManagedGroupAsync("grp-iam-new");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Id.Should().Be(newGroupId);
+        result.DisplayName.Should().Be("grp-iam-new");
+    }
+
+    [Fact]
+    public async Task CreateManagedGroupAsync_WhenGroupAlreadyExists_ReturnsExistingWithoutPost()
+    {
+        // Arrange
+        var existingGroupId = Guid.NewGuid();
+        _mockHandler.SetupGroups(JsonSerializer.Serialize(new
+        {
+            value = new[]
+            {
+                new { id = existingGroupId.ToString(), displayName = "grp-iam-existing" }
+            }
+        }));
+
+        // Act
+        var result = await _sut.CreateManagedGroupAsync("grp-iam-existing");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Id.Should().Be(existingGroupId);
+        result.DisplayName.Should().Be("grp-iam-existing");
+    }
 }

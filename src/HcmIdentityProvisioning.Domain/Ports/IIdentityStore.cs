@@ -20,4 +20,9 @@ public interface IIdentityStore
     Task ApplyBatchMutationsAsync(
         IEnumerable<DeltaAction> actions,
         CancellationToken ct = default);
+
+    Task<ManagedGroup> CreateManagedGroupAsync(
+        string displayName,
+        string? description = null,
+        CancellationToken ct = default);
 }

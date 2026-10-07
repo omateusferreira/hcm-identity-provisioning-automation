@@ -33,6 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IdentityReconciliationService>();
         services.AddTransient<ReconcileBatchUseCase>();
         services.AddTransient<DryRunAuditUseCase>();
+        services.AddTransient<EnsureManagedGroupsUseCase>();
 
         return services;
     }

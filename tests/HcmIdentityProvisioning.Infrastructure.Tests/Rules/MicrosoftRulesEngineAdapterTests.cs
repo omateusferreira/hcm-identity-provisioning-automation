@@ -100,4 +100,16 @@ public class MicrosoftRulesEngineAdapterTests
         groups.Should().Contain("grp-iam-all-staff");
         groups.Should().NotContain("grp-iam-finance");
     }
+
+    [Fact]
+    public void GetDeclaredGroupNames_ReturnsAllUniqueSuccessEventsFromRules()
+    {
+        var adapter = MicrosoftRulesEngineAdapter.FromJsonString(SampleRulesJson);
+
+        var declared = adapter.GetDeclaredGroupNames();
+
+        declared.Should().HaveCount(2);
+        declared.Should().Contain("grp-iam-finance");
+        declared.Should().Contain("grp-iam-engineering");
+    }
 }

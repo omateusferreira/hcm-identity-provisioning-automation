@@ -4,7 +4,7 @@
 [![C# 14](https://img.shields.io/badge/C%23-14-239120?logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
 [![Azure Functions](https://img.shields.io/badge/Azure%20Functions-v4%20Isolated-0062AD?logo=azurefunctions)](https://learn.microsoft.com/azure/azure-functions/)
 [![Microsoft Graph v5](https://img.shields.io/badge/Microsoft%20Graph-SDK%20v5-0078D4?logo=microsoft)](https://learn.microsoft.com/graph/)
-[![Tests](https://img.shields.io/badge/Tests-185%20Passed-success)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-196%20Passed-success)](tests/)
 
 Motor corporativo de governança e automação do ciclo de vida de identidades (**IAM / IGA / ILM**) que sincroniza os colaboradores de sistemas de Recursos Humanos / HCM (Human Capital Management) com o **Microsoft Entra ID** (antigo Azure AD).
 
@@ -200,7 +200,7 @@ Para restaurar dependências, compilar a solução e rodar toda a suíte de test
 # Compilar todos os projetos da solução
 dotnet build
 
-# Executar todos os 185 testes automatizados (Domain, Application, Infrastructure, Functions, Cli)
+# Executar todos os 196 testes automatizados (Domain, Application, Infrastructure, Functions, Cli)
 dotnet test
 ```
 
@@ -223,9 +223,28 @@ dotnet run --project src/HcmIdentityProvisioning.Cli -- sync --json-logs
 
 # Validar sintaxe e integridade das regras declarativas do rules.json
 dotnet run --project src/HcmIdentityProvisioning.Cli -- validate-rules
+
+# Inspecionar grupos declarados no rules.json em modo in-memory
+dotnet run --project src/HcmIdentityProvisioning.Cli -- ensure-groups --dry-run
 ```
 
-#### 2. Modo Sandbox Real (Microsoft Entra ID)
+#### 2. Provisionamento Automático de Grupos no Entra ID (`ensure-groups`)
+Para não precisar criar manualmente no portal do Azure cada grupo de segurança exigido pelas regras (`rules.json`), use o subcomando administrativo `ensure-groups`. Ele compara as regras com os grupos existentes no tenant e cria automaticamente apenas os grupos faltantes (com `securityEnabled: true`, `mailEnabled: false` e prefixo `grp-iam-`):
+
+```bash
+# 1. Auditar quais grupos faltam no seu Entra ID Sandbox (Dry-Run)
+dotnet run --project src/HcmIdentityProvisioning.Cli -- ensure-groups \
+  --entra \
+  --tenant-domain "seutenant-sandbox.onmicrosoft.com" \
+  --dry-run
+
+# 2. Criar automaticamente os grupos faltantes no Microsoft Entra ID
+dotnet run --project src/HcmIdentityProvisioning.Cli -- ensure-groups \
+  --entra \
+  --tenant-domain "seutenant-sandbox.onmicrosoft.com"
+```
+
+#### 3. Modo Sandbox Real (Microsoft Entra ID — `sync`)
 Para testar a integração real com o Microsoft Entra ID usando dados de RH fictícios, use a flag `--entra` (ou `--idp entra`). O CLI utiliza `DefaultAzureCredential()`, permitindo autenticação local via `az login` ou variáveis de ambiente de um Service Principal.
 
 ```bash
@@ -268,7 +287,7 @@ dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
 
 | Opção | Descrição | Padrão |
 | :--- | :--- | :--- |
-| `--dry-run` | Executa o cálculo de deltas em modo auditoria sem persistir alterações no IdP | `false` |
+| `--dry-run` | Executa o cálculo em modo auditoria sem persistir alterações no IdP | `false` |
 | `--idp <in-memory\|entra>` | Define o provedor de identidade destino | `in-memory` |
 | `--entra` | Atalho conveniente para selecionar o Microsoft Entra ID como IdP | `false` |
 | `--tenant-domain <dominio>` | Domínio do tenant Entra ID (ex: `sandbox.onmicrosoft.com`) | `ENTRA_TENANT_DOMAIN` ou `company.onmicrosoft.com` |

@@ -125,4 +125,21 @@ public sealed class InMemoryIdentityStore : IIdentityStore
 
         return Task.CompletedTask;
     }
+
+    public Task<ManagedGroup> CreateManagedGroupAsync(
+        string displayName,
+        string? description = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+
+        if (_groupsByName.TryGetValue(displayName, out var existing))
+        {
+            return Task.FromResult(existing);
+        }
+
+        var newGroup = new ManagedGroup(Guid.NewGuid(), displayName);
+        _groupsByName[displayName] = newGroup;
+        return Task.FromResult(newGroup);
+    }
 }

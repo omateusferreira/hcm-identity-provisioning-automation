@@ -139,6 +139,66 @@ public class EntraIdGraphAdapter : IIdentityStore
         }
     }
 
+    public async Task<ManagedGroup> CreateManagedGroupAsync(
+        string displayName,
+        string? description = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+
+        var existingGroups = await GetManagedGroupsAsync(ct);
+        if (existingGroups.TryGetValue(displayName, out var existing))
+        {
+            _logger.LogInformation("Managed group '{DisplayName}' already exists in Entra ID (Id: {GroupId})", displayName, existing.Id);
+            return existing;
+        }
+
+        var alphanumericNickname = System.Text.RegularExpressions.Regex.Replace(displayName, @"[^a-zA-Z0-9]", "");
+        if (string.IsNullOrWhiteSpace(alphanumericNickname))
+        {
+            alphanumericNickname = "grpiam" + Guid.NewGuid().ToString("N")[..8];
+        }
+
+        var newGroup = new Group
+        {
+            DisplayName = displayName,
+            MailNickname = alphanumericNickname,
+            MailEnabled = false,
+            SecurityEnabled = true,
+            Description = description ?? $"Managed security group created by HCM Identity Provisioning for {displayName}"
+        };
+
+        _logger.LogInformation("Creating managed security group '{DisplayName}' in Microsoft Entra ID", displayName);
+        var created = await _graphClient.Groups.PostAsync(newGroup, cancellationToken: ct);
+
+        if (created == null || string.IsNullOrWhiteSpace(created.Id) || !Guid.TryParse(created.Id, out var createdId))
+        {
+            throw new InvalidOperationException($"Failed to create group '{displayName}' in Microsoft Entra ID: invalid response.");
+        }
+
+        var managedGroup = new ManagedGroup(createdId, displayName);
+
+        await _groupsLock.WaitAsync(ct);
+        try
+        {
+            if (_cachedManagedGroups != null)
+            {
+                var updated = new Dictionary<string, ManagedGroup>(_cachedManagedGroups, StringComparer.OrdinalIgnoreCase)
+                {
+                    [displayName] = managedGroup
+                };
+                _cachedManagedGroups = updated;
+            }
+        }
+        finally
+        {
+            _groupsLock.Release();
+        }
+
+        _logger.LogInformation("Successfully created managed security group '{DisplayName}' (Id: {GroupId}) in Microsoft Entra ID", displayName, createdId);
+        return managedGroup;
+    }
+
     public async Task<bool> IsUserPrincipalNameAvailableAsync(UserPrincipalName upn, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(upn);

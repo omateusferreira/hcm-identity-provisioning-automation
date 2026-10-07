@@ -71,6 +71,7 @@ static IServiceProvider BuildServiceProvider(SyncCliOptions options)
 
 var rootCommand = new RootCommand("HCM to Microsoft Entra ID Provisioning & Lifecycle Engine");
 rootCommand.AddCommand(SyncCommand.Create(BuildServiceProvider));
+rootCommand.AddCommand(EnsureGroupsCommand.Create(BuildServiceProvider));
 rootCommand.AddCommand(ValidateRulesCommand.Create());
 
 var exitCode = await rootCommand.InvokeAsync(args);
