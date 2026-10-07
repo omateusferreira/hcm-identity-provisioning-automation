@@ -49,7 +49,8 @@ public sealed record RevokeSessionsAction(
 public sealed record AddGroupMemberAction(
     Guid GraphId,
     Guid GroupId,
-    string GroupName
+    string GroupName,
+    EmployeeId? EmployeeId = null
 ) : DeltaAction(GraphId)
 {
     public override string ActionName => "AddGroupMember";

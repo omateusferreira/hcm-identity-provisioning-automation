@@ -67,6 +67,36 @@ public class IdentityReconciliationServiceTests
     }
 
     [Fact]
+    public async Task Reconcile_WhenJoiner_SetsEmployeeIdOnAddGroupMemberAction()
+    {
+        var service = new IdentityReconciliationService(_rulesEngine, _pwdGen);
+        var emp = new Employee(
+            EmployeeId.Create("EMP-JOINER-1").Value,
+            "Maria Santos",
+            EmployeeStatus.Active,
+            "Tecnologia",
+            "Engenheira",
+            new Dictionary<string, string>()
+        );
+
+        _rulesEngine.EvaluateDesiredGroupsAsync(emp).Returns(new HashSet<string> { "grp-iam-engineering" });
+
+        var groupGuid = Guid.NewGuid();
+        var managedGroups = new Dictionary<string, ManagedGroup>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["grp-iam-engineering"] = new(groupGuid, "grp-iam-engineering")
+        };
+
+        var actions = await service.ReconcileEmployeeAsync(emp, null, "company.onmicrosoft.com", managedGroups, (_, _) => Task.FromResult(true));
+
+        var groupAction = actions.OfType<AddGroupMemberAction>().Should().ContainSingle().Subject;
+        groupAction.GraphId.Should().Be(Guid.Empty);
+        groupAction.GroupId.Should().Be(groupGuid);
+        groupAction.EmployeeId.Should().NotBeNull();
+        groupAction.EmployeeId!.Value.Should().Be("EMP-JOINER-1");
+    }
+
+    [Fact]
     public async Task Reconcile_WhenJoinerWithDiacriticsAndSpaces_SanitizesUpnCorrectly()
     {
         var service = new IdentityReconciliationService(_rulesEngine, _pwdGen);
