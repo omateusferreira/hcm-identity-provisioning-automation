@@ -1,24 +1,32 @@
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.Text.Json;
 using HcmIdentityProvisioning.Application.Models;
 using HcmIdentityProvisioning.Application.UseCases;
+using HcmIdentityProvisioning.Cli.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HcmIdentityProvisioning.Cli.Commands;
 
 public static class SyncCommand
 {
-    public static Command Create(IServiceProvider serviceProvider) =>
-        Create(_ => serviceProvider);
+    public static Command Create(IServiceProvider serviceProvider, IConsolePrompter? prompter = null) =>
+        Create(_ => serviceProvider, prompter);
 
-    public static Command Create(Func<string?, string?, IServiceProvider> serviceProviderFactory) =>
-        Create(opts => serviceProviderFactory(opts.RulesPath, opts.FixturesPath));
+    public static Command Create(Func<string?, string?, IServiceProvider> serviceProviderFactory, IConsolePrompter? prompter = null) =>
+        Create(opts => serviceProviderFactory(opts.RulesPath, opts.FixturesPath), prompter);
 
-    public static Command Create(Func<SyncCliOptions, IServiceProvider> serviceProviderFactory)
+    public static Command Create(Func<SyncCliOptions, IServiceProvider> serviceProviderFactory, IConsolePrompter? prompter = null)
     {
+        var effectivePrompter = prompter ?? new ConsolePrompter();
+
         var dryRunOption = new Option<bool>(
             name: "--dry-run",
             description: "Execute reconciliation in audit mode without committing changes.");
+
+        var yesOption = new Option<bool>(
+            aliases: ["--yes", "-y"],
+            description: "Automatic yes to prompts; run non-interactively without prompting for confirmation.");
 
         var jsonLogsOption = new Option<bool>(
             name: "--json-logs",
@@ -56,6 +64,7 @@ public static class SyncCommand
         var cmd = new Command("sync", "Executes HCM to Entra ID identity lifecycle synchronization.")
         {
             dryRunOption,
+            yesOption,
             jsonLogsOption,
             rulesOption,
             fixturesOption,
@@ -66,9 +75,10 @@ public static class SyncCommand
             mockEmailOption
         };
 
-        cmd.SetHandler(async (System.CommandLine.Invocation.InvocationContext context) =>
+        cmd.SetHandler(async (InvocationContext context) =>
         {
             var dryRun = context.ParseResult.GetValueForOption(dryRunOption);
+            var yesFlag = context.ParseResult.GetValueForOption(yesOption);
             var jsonLogs = context.ParseResult.GetValueForOption(jsonLogsOption);
             var rulesFile = context.ParseResult.GetValueForOption(rulesOption);
             var fixturesFile = context.ParseResult.GetValueForOption(fixturesOption);
@@ -124,12 +134,65 @@ public static class SyncCommand
                 if (dryRun)
                 {
                     var useCase = scope.ServiceProvider.GetRequiredService<DryRunAuditUseCase>();
-                    report = await useCase.ExecuteAsync();
+                    report = await useCase.ExecuteAsync(context.GetCancellationToken());
                 }
                 else
                 {
+                    var auditUseCase = scope.ServiceProvider.GetRequiredService<DryRunAuditUseCase>();
+                    var plannedReport = await auditUseCase.ExecuteAsync(context.GetCancellationToken());
+
+                    var totalPlannedMutations = plannedReport.CreatedCount
+                        + plannedReport.UpdatedCount
+                        + plannedReport.EnabledCount
+                        + plannedReport.DisabledCount
+                        + plannedReport.SessionsRevokedCount
+                        + plannedReport.GroupMembershipsAdded
+                        + plannedReport.GroupMembershipsRemoved;
+
+                    if (totalPlannedMutations > 0 && !yesFlag)
+                    {
+                        Console.WriteLine();
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"[CONFIRMATION REQUIRED] The following actions will be executed against the Identity Provider ({effectiveIdp}):");
+                        Console.WriteLine($"  - Users to create:            {plannedReport.CreatedCount}");
+                        Console.WriteLine($"  - Profiles to update:          {plannedReport.UpdatedCount}");
+                        Console.WriteLine($"  - Accounts to enable:          {plannedReport.EnabledCount}");
+                        Console.WriteLine($"  - Accounts to disable:         {plannedReport.DisabledCount}");
+                        Console.WriteLine($"  - Sessions to revoke:          {plannedReport.SessionsRevokedCount}");
+                        Console.WriteLine($"  - Group memberships to add:    {plannedReport.GroupMembershipsAdded}");
+                        Console.WriteLine($"  - Group memberships to remove: {plannedReport.GroupMembershipsRemoved}");
+
+                        if (plannedReport.CircuitBreakerTripped)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"\n[CIRCUIT BREAKER WARNING] {plannedReport.CircuitBreakerMessage}");
+                        }
+
+                        Console.ResetColor();
+
+                        if (effectivePrompter.IsInputRedirected)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine("\n[GUARD] Non-interactive environment detected. Use '--yes' / '-y' to confirm execution.");
+                            Console.ResetColor();
+                            context.ExitCode = 1;
+                            Environment.ExitCode = 1;
+                            return;
+                        }
+
+                        if (!effectivePrompter.Confirm("\nDo you want to apply these changes?"))
+                        {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine("\n[CANCELLED] Operation cancelled by user. No changes were made.");
+                            Console.ResetColor();
+                            context.ExitCode = 0;
+                            Environment.ExitCode = 0;
+                            return;
+                        }
+                    }
+
                     var useCase = scope.ServiceProvider.GetRequiredService<ReconcileBatchUseCase>();
-                    report = await useCase.ExecuteAsync();
+                    report = await useCase.ExecuteAsync(context.GetCancellationToken());
                 }
             }
             catch (Exception ex)

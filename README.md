@@ -4,7 +4,7 @@
 [![C# 14](https://img.shields.io/badge/C%23-14-239120?logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
 [![Azure Functions](https://img.shields.io/badge/Azure%20Functions-v4%20Isolated-0062AD?logo=azurefunctions)](https://learn.microsoft.com/azure/azure-functions/)
 [![Microsoft Graph v5](https://img.shields.io/badge/Microsoft%20Graph-SDK%20v5-0078D4?logo=microsoft)](https://learn.microsoft.com/graph/)
-[![Tests](https://img.shields.io/badge/Tests-196%20Passed-success)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-204%20Passed-success)](tests/)
 
 Motor corporativo de governança e automação do ciclo de vida de identidades (**IAM / IGA / ILM**) que sincroniza os colaboradores de sistemas de Recursos Humanos / HCM (Human Capital Management) com o **Microsoft Entra ID** (antigo Azure AD).
 
@@ -288,6 +288,7 @@ dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
 | Opção | Descrição | Padrão |
 | :--- | :--- | :--- |
 | `--dry-run` | Executa o cálculo em modo auditoria sem persistir alterações no IdP | `false` |
+| `--yes, -y` | Confirma automaticamente as alterações planejadas sem solicitar confirmação interativa [y/N] | `false` |
 | `--idp <in-memory\|entra>` | Define o provedor de identidade destino | `in-memory` |
 | `--entra` | Atalho conveniente para selecionar o Microsoft Entra ID como IdP | `false` |
 | `--tenant-domain <dominio>` | Domínio do tenant Entra ID (ex: `sandbox.onmicrosoft.com`) | `ENTRA_TENANT_DOMAIN` ou `company.onmicrosoft.com` |
@@ -296,6 +297,11 @@ dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
 | `--mock-email` | Simula entrega de credenciais nos logs, sem disparar e-mails reais | `false` |
 | `--sender-email <email>` | Shared mailbox remetente para envio via Microsoft Graph Mail API | `GRAPH_SENDER_EMAIL` |
 | `--json-logs` | Formata o relatório final como NDJSON estruturado | `false` |
+
+> [!TIP]
+> **Trava de Segurança Operacional (Operational Guardrail):**
+> Antes de aplicar qualquer mutação real no Identity Provider (`sync` ou `ensure-groups` sem `--dry-run`), o CLI calcula um plano de auditoria preliminar e solicita confirmação explícita interativa do administrador (`[y/N]`).
+> Caso seja executado em pipelines não interativos (CI/CD ou scripts com `stdin` redirecionado), o CLI aborta com código de saída `1` a menos que a flag `--yes` (ou `-y`) seja explicitamente informada.
 
 
 ### 4.4 Estendendo e Adicionando Novos Conectores HCM

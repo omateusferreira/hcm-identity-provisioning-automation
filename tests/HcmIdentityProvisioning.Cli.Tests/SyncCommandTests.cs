@@ -4,9 +4,11 @@ using HcmIdentityProvisioning.Application.Options;
 using HcmIdentityProvisioning.Application.Services;
 using HcmIdentityProvisioning.Application.UseCases;
 using HcmIdentityProvisioning.Cli.Commands;
+using HcmIdentityProvisioning.Cli.Utils;
 using HcmIdentityProvisioning.Domain.Actions;
 using HcmIdentityProvisioning.Domain.Common;
 using HcmIdentityProvisioning.Domain.Entities;
+using HcmIdentityProvisioning.Domain.Enums;
 using HcmIdentityProvisioning.Domain.Policies;
 using HcmIdentityProvisioning.Domain.Ports;
 using HcmIdentityProvisioning.Domain.ValueObjects;
@@ -19,22 +21,45 @@ namespace HcmIdentityProvisioning.Cli.Tests;
 
 public class SyncCommandTests
 {
-    private static IServiceProvider CreateMockServiceProvider(bool tripCircuitBreaker = false)
+    private static Employee CreateTestEmployee(string id = "EMP001", string name = "Ada Lovelace") =>
+        new Employee(
+            EmployeeId.Create(id).Value,
+            name,
+            EmployeeStatus.Active,
+            "Engineering",
+            "Developer",
+            new Dictionary<string, string>()
+        );
+
+    private static (IServiceProvider sp, IIdentityStore store) CreateMockServiceProviderWithStore(
+        bool tripCircuitBreaker = false,
+        IReadOnlyList<Employee>? employees = null)
     {
         var services = new ServiceCollection();
 
         var connector = Substitute.For<IHcmConnector>();
+        var employeeList = employees ?? [];
         connector.GetEmployeesPageAsync(1, 50, Arg.Any<CancellationToken>())
-            .Returns(new PagedResult<Employee>([], 1, 50, 0, false));
+            .Returns(new PagedResult<Employee>(employeeList, 1, 50, employeeList.Count, false));
 
         var store = Substitute.For<IIdentityStore>();
         store.GetManagedGroupsAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyDictionary<string, ManagedGroup>>(new Dictionary<string, ManagedGroup>()));
+            .Returns(Task.FromResult<IReadOnlyDictionary<string, ManagedGroup>>(new Dictionary<string, ManagedGroup>
+            {
+                ["grp-iam-engineering"] = new ManagedGroup(Guid.NewGuid(), "grp-iam-engineering")
+            }));
         store.GetUsersByEmployeeIdsAsync(Arg.Any<IEnumerable<EmployeeId>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyDictionary<EmployeeId, EntraUser>>(new Dictionary<EmployeeId, EntraUser>()));
+        store.IsUserPrincipalNameAvailableAsync(Arg.Any<UserPrincipalName>(), Arg.Any<CancellationToken>())
+            .Returns(true);
 
         var rulesEngine = Substitute.For<IRulesEngine>();
+        rulesEngine.EvaluateDesiredGroupsAsync(Arg.Any<Employee>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlySet<string>>(new HashSet<string> { "grp-iam-engineering" }));
+
         var pwdGen = Substitute.For<ISecurePasswordGenerator>();
+        pwdGen.GeneratePassword(Arg.Any<int>()).Returns("TempPass123!");
+
         var reconciler = new IdentityReconciliationService(rulesEngine, pwdGen);
 
         var circuitBreaker = Substitute.For<ICircuitBreaker>();
@@ -75,8 +100,11 @@ public class SyncCommandTests
         services.AddScoped(_ => reconcileUseCase);
         services.AddScoped(_ => dryRunUseCase);
 
-        return services.BuildServiceProvider();
+        return (services.BuildServiceProvider(), store);
     }
+
+    private static IServiceProvider CreateMockServiceProvider(bool tripCircuitBreaker = false) =>
+        CreateMockServiceProviderWithStore(tripCircuitBreaker).sp;
 
     [Fact]
     public async Task InvokeAsync_WithDefaultOptions_PassesInMemoryDefaultsToFactory()
@@ -184,6 +212,87 @@ public class SyncCommandTests
 
         // Assert
         exitCode.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithMutations_WhenPromptConfirmed_ExecutesReconciliation()
+    {
+        // Arrange
+        var emp = CreateTestEmployee();
+        var (sp, store) = CreateMockServiceProviderWithStore(employees: [emp]);
+        var prompter = Substitute.For<IConsolePrompter>();
+        prompter.IsInputRedirected.Returns(false);
+        prompter.Confirm(Arg.Any<string>()).Returns(true);
+
+        var cmd = SyncCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync([]);
+
+        // Assert
+        exitCode.Should().Be(0);
+        prompter.Received(1).Confirm(Arg.Any<string>());
+        await store.Received(1).ApplyBatchMutationsAsync(Arg.Any<IReadOnlyList<DeltaAction>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithMutations_WhenPromptCancelled_DoesNotExecuteMutations()
+    {
+        // Arrange
+        var emp = CreateTestEmployee();
+        var (sp, store) = CreateMockServiceProviderWithStore(employees: [emp]);
+        var prompter = Substitute.For<IConsolePrompter>();
+        prompter.IsInputRedirected.Returns(false);
+        prompter.Confirm(Arg.Any<string>()).Returns(false);
+
+        var cmd = SyncCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync([]);
+
+        // Assert
+        exitCode.Should().Be(0);
+        prompter.Received(1).Confirm(Arg.Any<string>());
+        await store.DidNotReceiveWithAnyArgs().ApplyBatchMutationsAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithMutations_WithYesFlag_BypassesPromptAndExecutes()
+    {
+        // Arrange
+        var emp = CreateTestEmployee();
+        var (sp, store) = CreateMockServiceProviderWithStore(employees: [emp]);
+        var prompter = Substitute.For<IConsolePrompter>();
+
+        var cmd = SyncCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync(["--yes"]);
+
+        // Assert
+        exitCode.Should().Be(0);
+        prompter.DidNotReceiveWithAnyArgs().Confirm(default!);
+        await store.Received(1).ApplyBatchMutationsAsync(Arg.Any<IReadOnlyList<DeltaAction>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithMutations_WhenInputRedirectedWithoutYes_ReturnsExitCode1()
+    {
+        // Arrange
+        var emp = CreateTestEmployee();
+        var (sp, store) = CreateMockServiceProviderWithStore(employees: [emp]);
+        var prompter = Substitute.For<IConsolePrompter>();
+        prompter.IsInputRedirected.Returns(true);
+
+        var cmd = SyncCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync([]);
+
+        // Assert
+        exitCode.Should().Be(1);
+        prompter.DidNotReceiveWithAnyArgs().Confirm(default!);
+        await store.DidNotReceiveWithAnyArgs().ApplyBatchMutationsAsync(default!, default);
     }
 
     [Fact]

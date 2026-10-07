@@ -4,6 +4,7 @@ using HcmIdentityProvisioning.Application.Models;
 using HcmIdentityProvisioning.Application.Options;
 using HcmIdentityProvisioning.Application.UseCases;
 using HcmIdentityProvisioning.Cli.Commands;
+using HcmIdentityProvisioning.Cli.Utils;
 using HcmIdentityProvisioning.Domain.Entities;
 using HcmIdentityProvisioning.Domain.Ports;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +16,7 @@ namespace HcmIdentityProvisioning.Cli.Tests;
 
 public class EnsureGroupsCommandTests
 {
-    private static IServiceProvider CreateMockServiceProvider()
+    private static (IServiceProvider sp, IIdentityStore store) CreateMockServiceProviderWithStore()
     {
         var services = new ServiceCollection();
 
@@ -44,8 +45,10 @@ public class EnsureGroupsCommandTests
 
         services.AddScoped(_ => useCase);
 
-        return services.BuildServiceProvider();
+        return (services.BuildServiceProvider(), store);
     }
+
+    private static IServiceProvider CreateMockServiceProvider() => CreateMockServiceProviderWithStore().sp;
 
     [Fact]
     public async Task InvokeAsync_WithDefaultOptions_PassesInMemoryDefaultsToFactory()
@@ -61,7 +64,7 @@ public class EnsureGroupsCommandTests
         });
 
         // Act
-        var exitCode = await cmd.InvokeAsync(["--rules", "rules.json"]);
+        var exitCode = await cmd.InvokeAsync(["--rules", "rules.json", "--yes"]);
 
         // Assert
         exitCode.Should().Be(0);
@@ -86,7 +89,8 @@ public class EnsureGroupsCommandTests
         // Act
         var exitCode = await cmd.InvokeAsync([
             "--entra",
-            "--tenant-domain", "sandbox.onmicrosoft.com"
+            "--tenant-domain", "sandbox.onmicrosoft.com",
+            "--yes"
         ]);
 
         // Assert
@@ -108,6 +112,83 @@ public class EnsureGroupsCommandTests
 
         // Assert
         exitCode.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithoutYes_WhenPromptCancelled_DoesNotCreateGroups()
+    {
+        // Arrange
+        var (sp, store) = CreateMockServiceProviderWithStore();
+        var prompter = Substitute.For<IConsolePrompter>();
+        prompter.IsInputRedirected.Returns(false);
+        prompter.Confirm(Arg.Any<string>()).Returns(false);
+
+        var cmd = EnsureGroupsCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync([]);
+
+        // Assert
+        exitCode.Should().Be(0);
+        prompter.Received(1).Confirm(Arg.Any<string>());
+        await store.DidNotReceiveWithAnyArgs().CreateManagedGroupAsync(default!, default, default);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithoutYes_WhenPromptConfirmed_CreatesGroups()
+    {
+        // Arrange
+        var (sp, store) = CreateMockServiceProviderWithStore();
+        var prompter = Substitute.For<IConsolePrompter>();
+        prompter.IsInputRedirected.Returns(false);
+        prompter.Confirm(Arg.Any<string>()).Returns(true);
+
+        var cmd = EnsureGroupsCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync([]);
+
+        // Assert
+        exitCode.Should().Be(0);
+        prompter.Received(1).Confirm(Arg.Any<string>());
+        await store.Received(2).CreateManagedGroupAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithYesFlag_BypassesPromptAndCreatesGroups()
+    {
+        // Arrange
+        var (sp, store) = CreateMockServiceProviderWithStore();
+        var prompter = Substitute.For<IConsolePrompter>();
+
+        var cmd = EnsureGroupsCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync(["--yes"]);
+
+        // Assert
+        exitCode.Should().Be(0);
+        prompter.DidNotReceiveWithAnyArgs().Confirm(default!);
+        await store.Received(2).CreateManagedGroupAsync(Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenInputRedirectedWithoutYes_ReturnsExitCode1()
+    {
+        // Arrange
+        var (sp, store) = CreateMockServiceProviderWithStore();
+        var prompter = Substitute.For<IConsolePrompter>();
+        prompter.IsInputRedirected.Returns(true);
+
+        var cmd = EnsureGroupsCommand.Create(_ => sp, prompter);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync([]);
+
+        // Assert
+        exitCode.Should().Be(1);
+        prompter.DidNotReceiveWithAnyArgs().Confirm(default!);
+        await store.DidNotReceiveWithAnyArgs().CreateManagedGroupAsync(default!, default, default);
     }
 
     [Fact]
