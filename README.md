@@ -38,12 +38,39 @@ Projetado sob os princípios de **Clean Architecture**, **Hexagonal Architecture
 
 ## 1. Visão Geral & Objetivos
 
-Em ambientes corporativos, manter as contas e grupos do diretório em sincronia contínua com a base do RH costuma depender de integrações complexas ou de produtos de licenciamento onerosos. Este projeto fornece uma base de referência aberta, robusta e modular para:
+### O Problema de Negócio
+Em muitas organizações, o processo que conecta o departamento de Recursos Humanos (RH) à equipe de TI e Segurança da Informação ainda é manual, fragmentado ou apoiado em chamados lentos:
+- **Novas Admissões:** Um colaborador é contratado, mas no primeiro dia de trabalho ainda não possui conta de e-mail, credenciais nem os grupos de acesso necessários para exercer sua função, gerando ociosidade e perda de produtividade.
+- **Mudanças de Área ou Promoções:** Quando um colaborador é transferido de setor (por exemplo, do Financeiro para a Tecnologia), ele recebe novos acessos, mas os acessos antigos raramente são revogados. Com o tempo, acumulam-se privilégios excessivos (*access creep*), violando políticas de conformidade e auditoria.
+- **Desligamentos:** Quando um colaborador é demitido ou encerra seu contrato, a notificação para a TI pode levar horas ou dias. Enquanto isso, o acesso a sistemas e e-mails corporativos continua ativo, criando um dos maiores vetores de vazamento de dados e incidentes de segurança.
 
-1. **Autoridade do HCM:** O sistema de RH é a única fonte da verdade para o vínculo empregatício e atributos organizacionais (cargo, departamento, centro de custo).
-2. **Automação Completa:** Elimina tarefas manuais de criação de contas, atribuição de grupos e desativação em desligamentos.
-3. **Segurança por Padrão (Zero Trust & Menor Privilégio):** Credenciais temporárias geradas criptograficamente, políticas de troca de senha no primeiro login, senhas nunca gravadas em logs e permissões de e-mail restritas por política.
-4. **Resiliência e Idempotência:** Múltiplas execuções contra os mesmos dados produzem **zero mutações** no Microsoft Entra ID.
+Além disso, ferramentas nativas de provisionamento automático em nuvem costumam exigir planos de licenciamento caros por usuário (como Microsoft Entra ID P1/P2 ou pacotes adicionais de governança), tornando a automação proibitiva para pequenas e médias empresas ou organizações que utilizam o nível **Microsoft Entra ID Free**.
+
+### O Objetivo do Sistema
+Este projeto foi criado para ser o **motor central de governança e automação do ciclo de vida de identidades (Identity Lifecycle Management - ILM)** da organização. Ele estabelece o sistema de RH (HCM) como a **única fonte autoritativa da verdade** sobre as pessoas e sincroniza continuamente o estado funcional dos colaboradores com o diretório em nuvem no Microsoft Entra ID.
+
+O objetivo principal é garantir que **nenhuma intervenção humana manual seja necessária** para gerenciar contas e acessos básicos conforme os colaboradores entram, mudam de papel ou saem da empresa.
+
+### Processos e Regras de Negócio Atendidos
+
+O motor atende de ponta a ponta aos três grandes momentos do ciclo de vida do colaborador na empresa:
+
+1. **Admissões (Joiners):**
+   - Detecta novos colaboradores cadastrados e ativos no RH que ainda não possuem identidade no diretório.
+   - Gera e padroniza a identidade corporativa (`UserPrincipalName` / e-mail) com base no nome do colaborador, resolvendo conflitos de homônimos de forma determinística caso já exista alguém com o mesmo nome na organização.
+   - Atribui os grupos de segurança e permissões iniciais necessários de acordo com as regras de negócio do departamento, cargo e filial do colaborador.
+   - Cria o usuário exigindo a troca obrigatória de senha no primeiro login e disponibiliza o primeiro acesso para que o colaborador esteja apto a trabalhar desde o primeiro minuto do seu primeiro dia (*Day 1 Readiness*).
+
+2. **Movimentações Internas (Movers):**
+   - Identifica quando um colaborador em atividade teve seus dados alterados no RH (como retificação de nome, promoção de cargo ou transferência de departamento).
+   - Atualiza cadastros e reavalia dinamicamente quais grupos de acesso aquele colaborador deve possuir.
+   - Concede automaticamente os grupos requeridos para o novo cargo e remove os grupos específicos da função anterior que não fazem mais sentido, eliminando o acúmulo indevido de privilégios.
+
+3. **Desligamentos (Leavers):**
+   - Detecta quando o vínculo empregatício de um colaborador foi encerrado (status inativo ou demitido no RH).
+   - Bloqueia imediatamente a conta do usuário no diretório corporativo para impedir novos logins.
+   - Revoga de forma instantânea todas as sessões ativas e tokens de autenticação (invalidando acessos já abertos no navegador, Teams, Outlook e celulares).
+   - Remove o usuário de todos os grupos de segurança gerenciados, mantendo a conta desativada no diretório para fins de retenção histórica e auditoria.
 
 ---
 
