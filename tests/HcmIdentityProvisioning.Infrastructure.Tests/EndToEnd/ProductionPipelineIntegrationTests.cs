@@ -442,27 +442,30 @@ public sealed class ProductionPipelineIntegrationTests
         // 4. Batch payload verification sent to Microsoft Graph API (Two-Stage Parallel Batching: Stage 1 + Stage 2)
         directory.BatchRequestsReceived.Should().Be(2);
         directory.CapturedBatchBodies.Should().HaveCount(2);
-        var allBatchBodies = string.Join("\n", directory.CapturedBatchBodies);
 
-        // Scenario 1: Joiner Mariana Lima (EMP-001)
-        allBatchBodies.Should().Contain("mariana.lima@company.onmicrosoft.com");
+        var stage1BatchBody = directory.CapturedBatchBodies[0];
+        var stage2BatchBody = directory.CapturedBatchBodies[1];
 
-        // Scenario 4: Homonym Mariana Lima (EMP-004) resolved with suffix 2
-        allBatchBodies.Should().Contain("mariana.lima2@company.onmicrosoft.com");
+        // Lote 1 contém criações e mutações de perfil/sessão e mutações diretas de mover (sem dependsOn)
+        stage1BatchBody.Should().Contain("mariana.lima@company.onmicrosoft.com");
+        stage1BatchBody.Should().Contain("mariana.lima2@company.onmicrosoft.com");
+        stage1BatchBody.Should().Contain("jose.davila@company.onmicrosoft.com");
+        stage1BatchBody.Should().Contain($"/users/{directory.LeaverGraphId}");
+        stage1BatchBody.Should().Contain($"/users/{directory.LeaverGraphId}/revokeSignInSessions");
+        stage1BatchBody.Should().Contain($"/groups/{directory.EngineeringGroupId}/members/{directory.MoverGraphId}/$ref");
+        stage1BatchBody.Should().Contain($"/groups/{directory.FinanceGroupId}/members/$ref");
+        stage1BatchBody.Should().NotContain("dependsOn");
 
-        // Scenario 5: Diacritics José d'Ávila (EMP-005) sanitized to jose.davila
-        allBatchBodies.Should().Contain("jose.davila@company.onmicrosoft.com");
+        // Lote 2 contém associações de grupos dos novos usuários (sem dependsOn, sem $1, com URIs canônicas)
+        stage2BatchBody.Should().Contain($"/groups/{directory.EngineeringGroupId}/members/$ref");
+        stage2BatchBody.Should().Contain($"/groups/{directory.AllStaffGroupId}/members/$ref");
+        stage2BatchBody.Should().Contain("https://graph.microsoft.com/v1.0/directoryObjects/");
+        stage2BatchBody.Should().NotContain("dependsOn");
+        stage2BatchBody.Should().NotContain("$1");
 
-        // Scenario 3: Leaver Beatriz Souza (EMP-003) disabled & sessions revoked
-        allBatchBodies.Should().Contain($"/users/{directory.LeaverGraphId}");
-        allBatchBodies.Should().Contain($"/users/{directory.LeaverGraphId}/revokeSignInSessions");
-
-        // Scenario 2: Mover Rodrigo Alves (EMP-002) group transitions
-        allBatchBodies.Should().Contain($"/groups/{directory.EngineeringGroupId}/members/{directory.MoverGraphId}/$ref");
-        allBatchBodies.Should().Contain($"/groups/{directory.FinanceGroupId}/members/$ref");
-
-        // Scenario 6: Idempotent No-Op Felipe Gomes (EMP-006) generated zero mutations for its ID
-        allBatchBodies.Should().NotContain(directory.NoopGraphId.ToString());
+        // Scenario 6: Idempotent No-Op Felipe Gomes (EMP-006) generated zero mutations
+        stage1BatchBody.Should().NotContain(directory.NoopGraphId.ToString());
+        stage2BatchBody.Should().NotContain(directory.NoopGraphId.ToString());
 
         // Act - Pass 2: Strict Idempotency execution over unchanged sources
         var pass2Report = await useCase.ExecuteAsync();
