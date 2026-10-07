@@ -12,7 +12,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Graph;
 
-static IServiceProvider BuildServiceProvider(SyncCliOptions options)
+var isVerbose = args.Contains("--verbose", StringComparer.OrdinalIgnoreCase) || args.Contains("-v", StringComparer.OrdinalIgnoreCase);
+
+IServiceProvider BuildServiceProvider(SyncCliOptions options)
 {
     var services = new ServiceCollection();
     services.AddLogging(builder =>
@@ -20,7 +22,7 @@ static IServiceProvider BuildServiceProvider(SyncCliOptions options)
         builder.AddConsole(cOptions =>
         {
             cOptions.LogToStandardErrorThreshold = LogLevel.Warning;
-        }).SetMinimumLevel(LogLevel.Warning);
+        }).SetMinimumLevel(isVerbose ? LogLevel.Information : LogLevel.Warning);
     });
 
     var settings = new SyncSettings
@@ -70,9 +72,16 @@ static IServiceProvider BuildServiceProvider(SyncCliOptions options)
 }
 
 var rootCommand = new RootCommand("HCM to Microsoft Entra ID Provisioning & Lifecycle Engine");
+
+var verboseOption = new Option<bool>(
+    aliases: ["--verbose", "-v"],
+    description: "Enable verbose diagnostic logging (LogLevel.Information).");
+rootCommand.AddGlobalOption(verboseOption);
+
 rootCommand.AddCommand(SyncCommand.Create(BuildServiceProvider));
 rootCommand.AddCommand(EnsureGroupsCommand.Create(BuildServiceProvider));
 rootCommand.AddCommand(ValidateRulesCommand.Create());
 
 var exitCode = await rootCommand.InvokeAsync(args);
 return Environment.ExitCode != 0 ? Environment.ExitCode : exitCode;
+
