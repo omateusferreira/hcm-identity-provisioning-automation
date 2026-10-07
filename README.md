@@ -4,7 +4,7 @@
 [![C# 14](https://img.shields.io/badge/C%23-14-239120?logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
 [![Azure Functions](https://img.shields.io/badge/Azure%20Functions-v4%20Isolated-0062AD?logo=azurefunctions)](https://learn.microsoft.com/azure/azure-functions/)
 [![Microsoft Graph v5](https://img.shields.io/badge/Microsoft%20Graph-SDK%20v5-0078D4?logo=microsoft)](https://learn.microsoft.com/graph/)
-[![Tests](https://img.shields.io/badge/Tests-176%20Passed-success)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-185%20Passed-success)](tests/)
 
 Motor corporativo de governança e automação do ciclo de vida de identidades (**IAM / IGA / ILM**) que sincroniza os colaboradores de sistemas de Recursos Humanos / HCM (Human Capital Management) com o **Microsoft Entra ID** (antigo Azure AD).
 
@@ -181,7 +181,8 @@ HcmIdentityProvisioning.sln
     ├── HcmIdentityProvisioning.Domain.Tests/
     ├── HcmIdentityProvisioning.Application.Tests/
     ├── HcmIdentityProvisioning.Infrastructure.Tests/
-    └── HcmIdentityProvisioning.Functions.Tests/
+    ├── HcmIdentityProvisioning.Functions.Tests/
+    └── HcmIdentityProvisioning.Cli.Tests/
 ```
 
 ---
@@ -196,30 +197,87 @@ HcmIdentityProvisioning.sln
 Para restaurar dependências, compilar a solução e rodar toda a suíte de testes automatizados:
 
 ```bash
-# Compilar todos os projetos
+# Compilar todos os projetos da solução
 dotnet build
 
-# Executar todos os 176 testes automatizados
+# Executar todos os 185 testes automatizados (Domain, Application, Infrastructure, Functions, Cli)
 dotnet test
 ```
 
-### 4.3 Executando o CLI Sandbox (Modo Offline)
+### 4.3 Executando o CLI (Modo Offline & Sandbox Entra ID Real)
 
-O projeto inclui um sandbox autossuficiente com dados sintéticos (`fixtures/synthetic-employees.json`), permitindo rodar simulações completas em milissegundos sem precisar de credenciais do Azure:
+A ferramenta administrativa CLI (`HcmIdentityProvisioning.Cli`) compartilha exatamente o mesmo motor de conciliação, regras e adaptadores do Azure Functions. Ela permite simular e validar o provisionamento tanto em modo offline (em memória) quanto diretamente contra um tenant sandbox real do Microsoft Entra ID.
+
+#### 1. Modo Offline (In-Memory — Padrão)
+Por padrão, o CLI roda com `InMemoryIdentityStore` e dados sintéticos locais (`fixtures/synthetic-employees.json`), sem necessidade de credenciais do Azure:
 
 ```bash
 # Execução em Modo Auditoria (Dry-Run: apenas calcula deltas, sem alterar nada)
 dotnet run --project src/HcmIdentityProvisioning.Cli -- sync --dry-run
 
-# Execução Normal em Memória (Aplica mutações na InMemoryIdentityStore)
+# Execução Normal em Memória (Aplica mutações na InMemoryIdentityStore simulada)
 dotnet run --project src/HcmIdentityProvisioning.Cli -- sync
 
-# Execução com saída estruturada em JSON (NDJSON para envio a SIEMs)
+# Execução com saída estruturada em JSON (NDJSON para ingestão por SIEMs)
 dotnet run --project src/HcmIdentityProvisioning.Cli -- sync --json-logs
 
-# Validar sintaxe e integridade das regras de negócio do rules.json
+# Validar sintaxe e integridade das regras declarativas do rules.json
 dotnet run --project src/HcmIdentityProvisioning.Cli -- validate-rules
 ```
+
+#### 2. Modo Sandbox Real (Microsoft Entra ID)
+Para testar a integração real com o Microsoft Entra ID usando dados de RH fictícios, use a flag `--entra` (ou `--idp entra`). O CLI utiliza `DefaultAzureCredential()`, permitindo autenticação local via `az login` ou variáveis de ambiente de um Service Principal.
+
+```bash
+# Autenticação prévia (opção A: Azure CLI)
+az login --tenant <SEU_TENANT_ID_SANDBOX>
+
+# Ou opção B: Variáveis de ambiente de App Registration
+# export AZURE_TENANT_ID="<TENANT_ID>"
+# export AZURE_CLIENT_ID="<CLIENT_ID>"
+# export AZURE_CLIENT_SECRET="<CLIENT_SECRET>"
+
+# 1. Auditoria Real contra o Sandbox (Dry-Run contra o Entra ID, sem aplicar alterações)
+dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
+  --entra \
+  --tenant-domain "seutenant-sandbox.onmicrosoft.com" \
+  --mock-email \
+  --dry-run
+
+# 2. Execução Real de Teste (Cria/atualiza usuários e grupos no Entra ID sandbox)
+dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
+  --entra \
+  --tenant-domain "seutenant-sandbox.onmicrosoft.com" \
+  --mock-email
+
+# 3. Execução Real com envio de e-mails de boas-vindas via Shared Mailbox
+dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
+  --entra \
+  --tenant-domain "seutenant-sandbox.onmicrosoft.com" \
+  --sender-email "no-reply@seutenant-sandbox.onmicrosoft.com"
+
+# 4. Usando um arquivo customizado de colaboradores fictícios
+dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
+  --entra \
+  --tenant-domain "seutenant-sandbox.onmicrosoft.com" \
+  --fixtures "./meus-dados-de-teste.json" \
+  --mock-email
+```
+
+#### Tabela de Opções do CLI (`hcm-sync`)
+
+| Opção | Descrição | Padrão |
+| :--- | :--- | :--- |
+| `--dry-run` | Executa o cálculo de deltas em modo auditoria sem persistir alterações no IdP | `false` |
+| `--idp <in-memory\|entra>` | Define o provedor de identidade destino | `in-memory` |
+| `--entra` | Atalho conveniente para selecionar o Microsoft Entra ID como IdP | `false` |
+| `--tenant-domain <dominio>` | Domínio do tenant Entra ID (ex: `sandbox.onmicrosoft.com`) | `ENTRA_TENANT_DOMAIN` ou `company.onmicrosoft.com` |
+| `--fixtures <arquivo.json>` | Caminho do arquivo JSON de colaboradores sintéticos | `fixtures/synthetic-employees.json` |
+| `--rules <arquivo.json>` | Caminho do arquivo de regras de negócio | `Rules/rules.json` |
+| `--mock-email` | Simula entrega de credenciais nos logs, sem disparar e-mails reais | `false` |
+| `--sender-email <email>` | Shared mailbox remetente para envio via Microsoft Graph Mail API | `GRAPH_SENDER_EMAIL` |
+| `--json-logs` | Formata o relatório final como NDJSON estruturado | `false` |
+
 
 ### 4.4 Estendendo e Adicionando Novos Conectores HCM
 
