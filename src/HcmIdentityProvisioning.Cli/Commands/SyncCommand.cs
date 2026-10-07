@@ -9,9 +9,12 @@ namespace HcmIdentityProvisioning.Cli.Commands;
 public static class SyncCommand
 {
     public static Command Create(IServiceProvider serviceProvider) =>
-        Create((_, _) => serviceProvider);
+        Create(_ => serviceProvider);
 
-    public static Command Create(Func<string?, string?, IServiceProvider> serviceProviderFactory)
+    public static Command Create(Func<string?, string?, IServiceProvider> serviceProviderFactory) =>
+        Create(opts => serviceProviderFactory(opts.RulesPath, opts.FixturesPath));
+
+    public static Command Create(Func<SyncCliOptions, IServiceProvider> serviceProviderFactory)
     {
         var dryRunOption = new Option<bool>(
             name: "--dry-run",
@@ -29,26 +32,86 @@ public static class SyncCommand
             name: "--fixtures",
             description: "Path to synthetic-employees.json file (defaults to application bundle or FIXTURES_FILE_PATH).");
 
+        var idpOption = new Option<string>(
+            name: "--idp",
+            description: "Target Identity Provider: 'in-memory' (default) or 'entra' / 'entra-id'.",
+            getDefaultValue: () => "in-memory");
+
+        var entraOption = new Option<bool>(
+            name: "--entra",
+            description: "Shortcut flag to target Microsoft Entra ID as Identity Provider.");
+
+        var tenantDomainOption = new Option<string?>(
+            name: "--tenant-domain",
+            description: "Microsoft Entra ID tenant domain (e.g. 'contoso.onmicrosoft.com'). Defaults to ENTRA_TENANT_DOMAIN or 'company.onmicrosoft.com'.");
+
+        var senderEmailOption = new Option<string?>(
+            name: "--sender-email",
+            description: "Shared mailbox sender email for Graph credential delivery (e.g. 'no-reply@contoso.onmicrosoft.com').");
+
+        var mockEmailOption = new Option<bool>(
+            name: "--mock-email",
+            description: "Simulate credential delivery in logs instead of sending real emails via Microsoft Graph.");
+
         var cmd = new Command("sync", "Executes HCM to Entra ID identity lifecycle synchronization.")
         {
             dryRunOption,
             jsonLogsOption,
             rulesOption,
-            fixturesOption
+            fixturesOption,
+            idpOption,
+            entraOption,
+            tenantDomainOption,
+            senderEmailOption,
+            mockEmailOption
         };
 
-        cmd.SetHandler(async (bool dryRun, bool jsonLogs, FileInfo? rulesFile, FileInfo? fixturesFile) =>
+        cmd.SetHandler(async (System.CommandLine.Invocation.InvocationContext context) =>
         {
+            var dryRun = context.ParseResult.GetValueForOption(dryRunOption);
+            var jsonLogs = context.ParseResult.GetValueForOption(jsonLogsOption);
+            var rulesFile = context.ParseResult.GetValueForOption(rulesOption);
+            var fixturesFile = context.ParseResult.GetValueForOption(fixturesOption);
+            var idpVal = context.ParseResult.GetValueForOption(idpOption);
+            var entraFlag = context.ParseResult.GetValueForOption(entraOption);
+            var tenantDomainVal = context.ParseResult.GetValueForOption(tenantDomainOption);
+            var senderEmailVal = context.ParseResult.GetValueForOption(senderEmailOption);
+            var mockEmailFlag = context.ParseResult.GetValueForOption(mockEmailOption);
+
+            var effectiveIdp = entraFlag ? "entra" : (idpVal?.Trim().ToLowerInvariant() ?? "in-memory");
+            if (effectiveIdp is "entra-id" or "entraid" or "azure" or "azuread")
+            {
+                effectiveIdp = "entra";
+            }
+
+            var effectiveTenantDomain = !string.IsNullOrWhiteSpace(tenantDomainVal)
+                ? tenantDomainVal.Trim()
+                : (Environment.GetEnvironmentVariable("ENTRA_TENANT_DOMAIN") ?? "company.onmicrosoft.com");
+
+            var effectiveSenderEmail = !string.IsNullOrWhiteSpace(senderEmailVal)
+                ? senderEmailVal.Trim()
+                : Environment.GetEnvironmentVariable("GRAPH_SENDER_EMAIL");
+
+            var cliOptions = new SyncCliOptions(
+                rulesFile?.FullName,
+                fixturesFile?.FullName,
+                effectiveIdp,
+                effectiveTenantDomain,
+                effectiveSenderEmail,
+                mockEmailFlag
+            );
+
             IServiceProvider sp;
             try
             {
-                sp = serviceProviderFactory(rulesFile?.FullName, fixturesFile?.FullName);
+                sp = serviceProviderFactory(cliOptions);
             }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"Error initializing configuration: {ex.Message}");
                 Console.ResetColor();
+                context.ExitCode = 1;
                 Environment.ExitCode = 1;
                 return;
             }
@@ -56,19 +119,36 @@ public static class SyncCommand
             using var scope = sp.CreateScope();
             SyncReport report;
 
-            if (dryRun)
+            try
             {
-                var useCase = scope.ServiceProvider.GetRequiredService<DryRunAuditUseCase>();
-                report = await useCase.ExecuteAsync();
+                if (dryRun)
+                {
+                    var useCase = scope.ServiceProvider.GetRequiredService<DryRunAuditUseCase>();
+                    report = await useCase.ExecuteAsync();
+                }
+                else
+                {
+                    var useCase = scope.ServiceProvider.GetRequiredService<ReconcileBatchUseCase>();
+                    report = await useCase.ExecuteAsync();
+                }
             }
-            else
+            catch (Exception ex)
             {
-                var useCase = scope.ServiceProvider.GetRequiredService<ReconcileBatchUseCase>();
-                report = await useCase.ExecuteAsync();
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.Error.WriteLine($"Sync execution failed: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Console.Error.WriteLine($"Details: {ex.InnerException.Message}");
+                }
+                Console.ResetColor();
+                context.ExitCode = 1;
+                Environment.ExitCode = 1;
+                return;
             }
 
             if (report.CircuitBreakerTripped)
             {
+                context.ExitCode = 2;
                 Environment.ExitCode = 2;
             }
 
@@ -81,7 +161,7 @@ public static class SyncCommand
                 Console.WriteLine();
                 Console.ForegroundColor = ConsoleColor.Cyan;
                 Console.WriteLine("=================================================");
-                Console.WriteLine($"  HCM IDENTITY RECONCILIATION REPORT (DryRun={dryRun})");
+                Console.WriteLine($"  HCM IDENTITY RECONCILIATION REPORT (DryRun={dryRun}, IdP={effectiveIdp})");
                 Console.WriteLine("=================================================");
                 Console.ResetColor();
                 Console.WriteLine($"Total Employees Processed:      {report.TotalProcessed}");
@@ -112,7 +192,7 @@ public static class SyncCommand
                 }
                 Console.WriteLine();
             }
-        }, dryRunOption, jsonLogsOption, rulesOption, fixturesOption);
+        });
 
         return cmd;
     }
