@@ -25,8 +25,9 @@ Projetado sob os princípios de **Clean Architecture**, **Hexagonal Architecture
 - [4. Guia para Novos Desenvolvedores (Ambiente Local)](#4-guia-para-novos-desenvolvedores-ambiente-local)
   - [4.1 Pré-requisitos](#41-pré-requisitos)
   - [4.2 Compilação & Testes](#42-compilação--testes)
-  - [4.3 Executando o CLI Sandbox (Modo Offline)](#43-executando-o-cli-sandbox-modo-offline)
+  - [4.3 Executando o CLI (Modo Offline & Sandbox Entra ID Real)](#43-executando-o-cli-modo-offline--sandbox-entra-id-real)
   - [4.4 Estendendo e Adicionando Novos Conectores HCM](#44-estendendo-e-adicionando-novos-conectores-hcm)
+  - [4.5 Boas Práticas Corporativas: Fork Privado & Atualizações Upstream](#45-boas-práticas-corporativas-fork-privado--atualizações-upstream)
 - [5. Guia de Implantação & Deployment (Azure Cloud)](#5-guia-de-implantação--deployment-azure-cloud)
   - [5.1 Pré-requisitos no Azure & Microsoft 365](#51-pré-requisitos-no-azure--microsoft-365)
   - [5.2 Configuração da Shared Mailbox & Política de Menor Privilégio](#52-configuração-da-shared-mailbox--política-de-menor-privilégio)
@@ -200,7 +201,7 @@ Para restaurar dependências, compilar a solução e rodar toda a suíte de test
 # Compilar todos os projetos da solução
 dotnet build
 
-# Executar todos os 196 testes automatizados (Domain, Application, Infrastructure, Functions, Cli)
+# Executar todos os 204 testes automatizados (Domain, Application, Infrastructure, Functions, Cli)
 dotnet test
 ```
 
@@ -322,6 +323,67 @@ O motor é agnóstico a sistemas específicos (ex: Workday, TOTVS, SAP, Senior, 
    }
    ```
 3. Registre seu conector no `Program.cs` via DI (`services.AddSingleton<IHcmConnector, MyCustomHcmConnector>()`).
+
+### 4.5 Boas Práticas Corporativas: Fork Privado & Atualizações Upstream
+
+Em ambientes corporativos, é fundamental **manter em sigilo** conectores de RH proprietários, esquemas de dados internos, endpoints de API locais e o arquivo `rules.json` da organização.
+
+O padrão de engenharia recomendado é **adotar o projeto como um Fork Privado (Downstream)**, consumindo melhorias, patches de segurança e novas versões do repositório público (*Upstream*) sem jamais expor dados confidenciais.
+
+> [!TIP]
+> **Como criar um Fork Privado no GitHub:**
+> O GitHub não permite transformar um repositório público em privado pelo botão nativo de "Fork". O procedimento oficial e recomendado via CLI é:
+>
+> ```bash
+> # 1. Crie um repositório VAZIO e PRIVADO no GitHub/GitLab (ex: hcm-provisioning-private)
+>
+> # 2. Clone o repositório público como bare mirror
+> git clone --bare https://github.com/mateus-iam/hcm-identity-provisioning-automation.git
+> cd hcm-identity-provisioning-automation.git
+>
+> # 3. Envie todo o histórico para o seu repositório privado
+> git push --mirror https://github.com/sua-organizacao/hcm-provisioning-private.git
+> cd ..
+> rm -rf hcm-identity-provisioning-automation.git
+>
+> # 4. Clone o seu repositório privado para desenvolvimento diário
+> git clone https://github.com/sua-organizacao/hcm-provisioning-private.git
+> cd hcm-provisioning-private
+>
+> # 5. Configure o repositório open source como upstream para atualizações futuras
+> git remote add upstream https://github.com/mateus-iam/hcm-identity-provisioning-automation.git
+> ```
+
+#### Como Sincronizar Atualizações do Open Source (`upstream`)
+
+Sempre que novas correções ou funcionalidades forem lançadas no repositório open source:
+
+```bash
+# 1. Puxar alterações da branch upstream
+git fetch upstream
+
+# 2. Mesclar de forma limpa na sua branch principal privada
+git checkout main
+git merge upstream/main
+
+# 3. Enviar as novidades para o repositório privado da empresa
+git push origin main
+```
+
+#### Dicas de Arquitetura para Zero Conflitos de Merge:
+
+Para garantir que os futuros `git merge upstream/main` ocorram de forma automática e **sem conflitos**:
+
+1. **Preserve os Projetos Centrais do Core:** Evite alterar o código em `src/HcmIdentityProvisioning.Domain/`, `src/HcmIdentityProvisioning.Application/` e os adaptadores base em `src/HcmIdentityProvisioning.Infrastructure/`.
+2. **Isole Conectores em Projetos Próprios:** Crie um projeto de biblioteca de classes separado (ex: `src/HcmIdentityProvisioning.Adapters.Senior/` ou `src/HcmIdentityProvisioning.Adapters.Totvs/`) contendo o seu conector que implementa `IHcmConnector` ou `IHcmPayloadMapper`.
+3. **Composição Exclusiva no `Program.cs`:** Apenas no Composition Root (`Program.cs` do CLI e da Function), substitua o conector sintético pelo seu conector dedicado:
+   ```csharp
+   // Substitua:
+   // services.AddSyntheticHcmConnector(fixturesPath);
+   // Por:
+   services.AddSingleton<IHcmConnector, SeniorHcmConnector>();
+   ```
+4. **Governança Segura do `rules.json`:** Armazene suas regras de produção no Azure Blob Storage autenticado por Managed Identity ou como arquivo de configuração seguro restrito ao repositório privado.
 
 ---
 
