@@ -1,6 +1,7 @@
 namespace HcmIdentityProvisioning.Infrastructure.Graph;
 
 using System.Net;
+using System.Text.Json;
 using Azure.Core;
 using Azure.Identity;
 using HcmIdentityProvisioning.Domain.Actions;
@@ -318,7 +319,7 @@ public class EntraIdGraphAdapter : IIdentityStore
 
         var throttledActions = new List<DeltaAction>();
         int maxRetryAfterSeconds = 0;
-        var unhandledFailures = new List<(string StepId, DeltaAction Action, HttpStatusCode StatusCode)>();
+        var unhandledFailures = new List<(string StepId, DeltaAction Action, HttpStatusCode StatusCode, string? ErrorDetails)>();
 
         foreach (var (stepId, action) in actionByStepId)
         {
@@ -358,11 +359,46 @@ public class EntraIdGraphAdapter : IIdentityStore
                 continue;
             }
 
+            // Extract error body from subresponse if available
+            string? errorDetails = null;
+            try
+            {
+                var subResponse = await batchResponse.GetResponseByIdAsync(stepId);
+                if (subResponse?.Content != null)
+                {
+                    errorDetails = await subResponse.Content.ReadAsStringAsync(ct);
+                }
+            }
+            catch
+            {
+                // Ignore extraction failures
+            }
+
+            string? friendlyMessage = null;
+            if (!string.IsNullOrWhiteSpace(errorDetails))
+            {
+                try
+                {
+                    using var jsonDoc = JsonDocument.Parse(errorDetails);
+                    if (jsonDoc.RootElement.TryGetProperty("error", out var errorProp) &&
+                        errorProp.TryGetProperty("message", out var msgProp))
+                    {
+                        friendlyMessage = msgProp.GetString();
+                    }
+                }
+                catch
+                {
+                    friendlyMessage = errorDetails;
+                }
+            }
+
+            var detailInfo = !string.IsNullOrWhiteSpace(friendlyMessage) ? $" Details: {friendlyMessage}" : string.Empty;
+
             // 5xx or unhandled non-success
             _logger.LogError(
-                "ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {StepId} for action {ActionName} failed with status {StatusCode}",
-                stepId, action.ActionName, statusCode);
-            unhandledFailures.Add((stepId, action, statusCode));
+                "ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {StepId} for action {ActionName} failed with status {StatusCode}.{DetailInfo}",
+                stepId, action.ActionName, statusCode, detailInfo);
+            unhandledFailures.Add((stepId, action, statusCode, friendlyMessage ?? errorDetails));
         }
 
         if (throttledActions.Count > 0)
@@ -390,8 +426,9 @@ public class EntraIdGraphAdapter : IIdentityStore
         if (unhandledFailures.Count > 0)
         {
             var first = unhandledFailures[0];
+            var detailText = !string.IsNullOrWhiteSpace(first.ErrorDetails) ? $" Reason: {first.ErrorDetails}" : string.Empty;
             throw new HttpRequestException(
-                $"ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {first.StepId} for action {first.Action.ActionName} failed with status {first.StatusCode}",
+                $"ERROR_GRAPH_SUBREQUEST_FAILED: Subrequest {first.StepId} for action {first.Action.ActionName} failed with status {first.StatusCode}.{detailText}",
                 null,
                 first.StatusCode);
         }
