@@ -12,6 +12,13 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageId>HcmIdentityProvisioning.Application</PackageId>
+    <Version>1.1.0</Version>
+    <Authors>Hcm Identity Provisioning Team</Authors>
+    <Description>Enterprise Microsoft Entra ID SCIM/HCM Provisioning Engine - Application Orchestration Layer</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 
 </Project>
