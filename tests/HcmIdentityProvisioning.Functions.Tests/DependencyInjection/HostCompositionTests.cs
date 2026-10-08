@@ -40,9 +40,9 @@ public class HostCompositionTests
             File.WriteAllText(dummyFixturesPath, "[]");
         }
 
-        services.AddHcmProvisioningCore(syncSettings, rulesJsonPath);
-        services.AddSyntheticHcmConnector(dummyFixturesPath);
-        services.AddInMemoryIdentityStore();
+        services.AddHcmProvisioning(syncSettings, rulesJsonPath)
+            .AddSyntheticConnector(dummyFixturesPath)
+            .AddInMemoryStore();
         services.AddTransient<SyncTimerFunction>();
 
         using var provider = services.BuildServiceProvider();
@@ -74,21 +74,21 @@ public class HostCompositionTests
         var mockGraphClient = new GraphServiceClient(new HttpClient(), new AnonymousAuthenticationProvider());
         services.AddSingleton(mockGraphClient);
 
-        services.AddHcmProvisioningCore(syncSettings, rulesJsonPath);
-        services.AddEntraIdGraphAdapter(options =>
-        {
-            options.TenantDomain = "company.onmicrosoft.com";
-            options.ManagedGroupPrefix = "grp-iam-";
-        });
-        services.AddGenericRestHcmConnector(options =>
-        {
-            options.BaseUrl = "https://api.hcm.example.com";
-            options.TimeoutSeconds = 10;
-        });
-        services.AddGraphEmailCredentialDeliveryService(options =>
-        {
-            options.SenderEmail = "no-reply@company.com";
-        });
+        services.AddHcmProvisioning(syncSettings, rulesJsonPath)
+            .AddEntraIdStore(options =>
+            {
+                options.TenantDomain = "company.onmicrosoft.com";
+                options.ManagedGroupPrefix = "grp-iam-";
+            })
+            .AddGenericRestConnector(options =>
+            {
+                options.BaseUrl = "https://api.hcm.example.com";
+                options.TimeoutSeconds = 10;
+            })
+            .AddGraphEmailCredentialDelivery(options =>
+            {
+                options.SenderEmail = "no-reply@company.com";
+            });
         services.AddTransient<SyncTimerFunction>();
 
         using var provider = services.BuildServiceProvider();

@@ -25,9 +25,10 @@ configuration.GetSection("HcmSync").Bind(syncSettings);
 
 var rulesPath = configuration["RulesEngine:RulesFilePath"] ?? "Rules/rules.json";
 
-builder.Services.AddHcmProvisioningCore(syncSettings, rulesPath);
-builder.Services.AddEntraIdGraphAdapter(options => configuration.GetSection("EntraId").Bind(options));
-builder.Services.AddGenericRestHcmConnector(options => configuration.GetSection("HcmRest").Bind(options));
+builder.Services.AddHcmProvisioning(syncSettings, rulesPath)
+    .AddEntraIdStore(options => configuration.GetSection("EntraId").Bind(options))
+    .AddGenericRestConnector(options => configuration.GetSection("HcmRest").Bind(options))
+    .AddGraphEmailCredentialDelivery(options => configuration.GetSection("GraphEmail").Bind(options));
 
 builder.Services.AddSingleton<GraphServiceClient>(sp =>
 {
@@ -35,7 +36,5 @@ builder.Services.AddSingleton<GraphServiceClient>(sp =>
     var credential = entraOptions.CustomCredential ?? new DefaultAzureCredential();
     return new GraphServiceClient(credential);
 });
-
-builder.Services.AddGraphEmailCredentialDeliveryService(options => configuration.GetSection("GraphEmail").Bind(options));
 
 builder.Build().Run();
