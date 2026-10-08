@@ -4,7 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
+    <PackageId>HcmIdentityProvisioning.Application</PackageId>
+    <Version>1.1.0</Version>
+    <Authors>Hcm Identity Provisioning Team</Authors>
+    <Description>Enterprise Application Use Cases and Services for HCM Identity Provisioning</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryType>git</RepositoryType>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

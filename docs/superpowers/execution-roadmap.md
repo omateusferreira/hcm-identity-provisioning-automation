@@ -128,6 +128,10 @@ flowchart TD
 - **Critério de Saída (DoD):**
   - `dotnet pack -c Release` gerando estritamente os 2 pacotes oficiais (`HcmIdentityProvisioning.1.1.0.nupkg` e `HcmIdentityProvisioning.Admin.1.1.0.nupkg`).
   - Suíte completa de testes aprovada com 235 testes verdes (`dotnet test`).
+- **Resolução de Empacotamento NuGet (NU1101 & NU5104) & Estabilização de Testes:**
+  - Publicação das 4 bibliotecas no ecossistema NuGet (`HcmIdentityProvisioning`, `HcmIdentityProvisioning.Admin`, `HcmIdentityProvisioning.Domain`, `HcmIdentityProvisioning.Application`) na versão `1.1.0`. O consumidor final continua instalando unicamente `HcmIdentityProvisioning` para serviços de provisionamento ou `HcmIdentityProvisioning.Admin` para CLIs corporativos, com restauração transparente de dependências sem erros `NU1101`.
+  - Supressão do warning `NU5104` em `HcmIdentityProvisioning.Admin` decorrente da pré-versão do `System.CommandLine`.
+  - Estabilização do teste de integração E2E `FullReconciliationCycle_ExecutesInSubsecond_AndMaintainsIdempotency` sob concorrência e carga de CPU.
 
 ---
 
