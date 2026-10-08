@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HcmIdentityProvisioning.Cli\HcmIdentityProvisioning.Cli.csproj" />
+    <ProjectReference Include="..\..\src\HcmIdentityProvisioning.Admin\HcmIdentityProvisioning.Admin.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,5 @@
 using FluentAssertions;
-using HcmIdentityProvisioning.Cli.Utils;
+using HcmIdentityProvisioning.Admin.Utils;
 using Xunit;
 
 namespace HcmIdentityProvisioning.Cli.Tests;
