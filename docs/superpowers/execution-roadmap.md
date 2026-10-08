@@ -1,7 +1,7 @@
 # Macro Execution Roadmap: HCM → Microsoft Entra ID Provisioning Engine
 
 - **Projeto:** HCM to Microsoft Entra ID Lifecycle & Provisioning Automation
-- **Status:** Ciclos 1, 2, 3 & Hardening/Packaging v1.1.0 Concluídos e Validados (209 testes) | Produção & NuGet Ready
+- **Status:** Ciclos 1, 2, 3, Hardening & Arquitetura NuGet de 2 Pacotes (v1.1.0) Concluídos e Validados (235 testes) | Produção & NuGet Ready
 - **Arquitetura Base:** [`docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md`](docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md)
 - **Runtime:** .NET 10 (`net10.0`), C# 14
 
@@ -49,6 +49,7 @@ flowchart TD
 | **Ciclo 2** | **Adaptadores de Produção (Graph & REST)** | Implementação real do `IIdentityStore` (Microsoft Graph v5 via Managed Identity) e `IHcmConnector` (REST HTTP resiliente). | [`docs/superpowers/plans/2026-10-06-cycle-2-production-adapters.md`](docs/superpowers/plans/2026-10-06-cycle-2-production-adapters.md) | **Concluído e Validado (159 testes)** |
 | **Ciclo 3** | **Automação Serverless & Observabilidade** | Host Azure Functions (.NET Isolated), agendamento cron, webhook manual, envio seguro de credenciais e App Insights. | [`docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md`](docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md) | **Concluído e Validado (173 testes)** |
 | **Hardening & NuGet (v1.1.0)** | **Two-Stage Parallel Batching & Empacotamento NuGet** | Refatoração Two-Stage Parallel Batching no Graph Adapter, paginação anti-ciclos nos casos de uso, leitura mascarada de senhas e distribuição NuGet (`Domain`, `Application`, `Infrastructure`). | [`docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md`](docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md) | **Concluído e Validado (209 testes)** |
+| **Arquitetura NuGet de 2 Pacotes (v1.1.0)** | **Consolidação dos 2 Pacotes Oficiais & Admin CLI SDK** | Publicação isolada de 2 pacotes oficiais de alto nível (`HcmIdentityProvisioning` para o core engine e `HcmIdentityProvisioning.Admin` para o CLI SDK administrativo). Camadas internas `Domain` e `Application` desabilitadas para publicação (`IsPackable: false`). CLI thin host runner e 235 testes automatizados aprovados. | [`docs/superpowers/plans/2026-10-08-hcm-provisioning-and-admin-nuget-architecture.md`](docs/superpowers/plans/2026-10-08-hcm-provisioning-and-admin-nuget-architecture.md) | **Concluído e Validado (235 testes)** |
 
 ---
 
@@ -111,6 +112,25 @@ flowchart TD
 
 ---
 
+### Arquitetura NuGet de 2 Pacotes: Core Engine (`HcmIdentityProvisioning`) & Admin SDK (`HcmIdentityProvisioning.Admin`)
+- **Objetivo:** Estabelecer uma arquitetura de distribuição limpa, desacoplada e orientada à intenção via 2 pacotes oficiais NuGet na versão `1.1.0`. Separar as preocupações de infraestrutura corporativa do ferramental de linha de comando, encapsular a topologia interna de camadas (`Domain` e `Application`) e habilitar extensibilidade de ferramentas administrativas por terceiros.
+- **Escopo Técnico:**
+  - Extração da biblioteca de classe `HcmIdentityProvisioning.Admin` (`net10.0`), encapsulando os builders de linha de comando (`AdminCliBuilder`), handlers, opções e contratos de console.
+  - Conversão do projeto `HcmIdentityProvisioning.Cli` em um executável console minimalista ("thin runner"), consumindo `HcmIdentityProvisioning.Admin`.
+  - Configuração do pacote oficial central:
+    - `HcmIdentityProvisioning` (originado de `src/HcmIdentityProvisioning.Infrastructure`): Contém o core provisioning engine, conectores, adapters de resiliência e conciliação de identidade. `<PackageId>HcmIdentityProvisioning</PackageId>` e `<IsPackable>true</IsPackable>`.
+  - Configuração do pacote oficial de administração:
+    - `HcmIdentityProvisioning.Admin` (originado de `src/HcmIdentityProvisioning.Admin`): SDK reutilizável para tooling e automações CLI. `<PackageId>HcmIdentityProvisioning.Admin</PackageId>` e `<IsPackable>true</IsPackable>`.
+  - Encapsulamento interno:
+    - `Domain.csproj` e `Application.csproj` configurados com `<IsPackable>false</IsPackable>`, garantindo que detalhes internos de Clean Architecture permaneçam protegidos contra dispersão no feed público de pacotes.
+    - `Cli.csproj` e `Functions.csproj` configurados com `<IsPackable>false</IsPackable>`.
+  - Suíte de testes expandida para 235 testes automatizados com cobertura total do novo SDK e comandos administrativos (`Admin.Tests`).
+- **Critério de Saída (DoD):**
+  - `dotnet pack -c Release` gerando estritamente os 2 pacotes oficiais (`HcmIdentityProvisioning.1.1.0.nupkg` e `HcmIdentityProvisioning.Admin.1.1.0.nupkg`).
+  - Suíte completa de testes aprovada com 235 testes verdes (`dotnet test`).
+
+---
+
 ## 4. Protocolo de Retroalimentação (Feedback Loop entre Ciclos)
 
 Ao término de qualquer ciclo:
@@ -137,3 +157,5 @@ Ao término de qualquer ciclo:
 | **Plano de Implementação - Ciclo 3** | [`docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md`](docs/superpowers/plans/2026-10-06-cycle-3-serverless-functions.md) | Plano fino para Azure Functions, telemetria e validação final. |
 | **Especificação Técnica - Hardening & NuGet** | [`docs/superpowers/specs/2026-10-07-graph-batch-two-stage-and-nuget-packaging-design.md`](docs/superpowers/specs/2026-10-07-graph-batch-two-stage-and-nuget-packaging-design.md) | Design de Two-Stage Parallel Batching, paginação defensiva, CLI masking e distribuição NuGet. |
 | **Plano de Implementação - Hardening & NuGet** | [`docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md`](docs/superpowers/plans/2026-10-07-graph-batch-two-stage-and-nuget-packaging.md) | Plano fino de execução para Two-Stage Parallel Batching e empacotamento NuGet v1.1.0. |
+| **Especificação Técnica - Arquitetura NuGet 2 Pacotes** | [`docs/superpowers/specs/2026-10-08-hcm-provisioning-and-admin-nuget-architecture-design.md`](docs/superpowers/specs/2026-10-08-hcm-provisioning-and-admin-nuget-architecture-design.md) | Design arquitetural da separação em 2 pacotes oficiais (`HcmIdentityProvisioning` e `HcmIdentityProvisioning.Admin`). |
+| **Plano de Implementação - Arquitetura NuGet 2 Pacotes** | [`docs/superpowers/plans/2026-10-08-hcm-provisioning-and-admin-nuget-architecture.md`](docs/superpowers/plans/2026-10-08-hcm-provisioning-and-admin-nuget-architecture.md) | Plano fino de execução para extração do Admin SDK, empacotamento oficial e 235 testes. |

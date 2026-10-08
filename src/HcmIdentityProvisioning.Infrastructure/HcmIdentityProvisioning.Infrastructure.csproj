@@ -27,13 +27,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PackageId>HcmIdentityProvisioning.Infrastructure</PackageId>
+    <PackageId>HcmIdentityProvisioning</PackageId>
     <Version>1.1.0</Version>
     <Authors>Hcm Identity Provisioning Team</Authors>
-    <Description>Enterprise Microsoft Entra ID SCIM/HCM Provisioning Engine - Infrastructure Adapters Layer</Description>
+    <Description>Enterprise Microsoft Entra ID SCIM/HCM Provisioning &amp; Reconciliation Engine</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
 </Project>
