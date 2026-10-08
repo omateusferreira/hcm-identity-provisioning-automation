@@ -21,11 +21,21 @@ namespace HcmIdentityProvisioning.Infrastructure.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
+    public static IHcmProvisioningBuilder AddHcmProvisioning(
+        this IServiceCollection services,
+        SyncSettings settings,
+        string rulesJsonPath)
+    {
+        services.AddHcmProvisioningCore(settings, rulesJsonPath);
+        return new HcmProvisioningBuilder(services, settings);
+    }
+
     public static IServiceCollection AddHcmProvisioningCore(
         this IServiceCollection services,
         SyncSettings settings,
         string rulesJsonPath)
     {
+        services.AddLogging();
         services.AddSingleton(settings);
         services.AddSingleton<ISecurePasswordGenerator, SecurePasswordGenerator>();
         services.AddSingleton<ICircuitBreaker>(_ => new DisablementCircuitBreaker(settings.MaxDisablementPercentage, settings.MaxDisablementCount));
