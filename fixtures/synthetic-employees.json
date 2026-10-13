@@ -1,0 +1,58 @@
+[
+  {
+    "id": "EMP-001",
+    "fullName": "Mariana Lima",
+    "status": "Active",
+    "department": "Tecnologia",
+    "jobTitle": "Engenheiro de Software",
+    "extendedAttributes": {
+      "email": "mariana.personal@example.com"
+    }
+  },
+  {
+    "id": "EMP-002",
+    "fullName": "Rodrigo Alves",
+    "status": "Active",
+    "department": "Financeiro",
+    "jobTitle": "Analista Financeiro",
+    "extendedAttributes": {
+      "email": "rodrigo.alves@example.com"
+    }
+  },
+  {
+    "id": "EMP-003",
+    "fullName": "Beatriz Souza",
+    "status": "Inactive",
+    "department": "Marketing",
+    "jobTitle": "Coordenadora",
+    "extendedAttributes": {}
+  },
+  {
+    "id": "EMP-004",
+    "fullName": "Mariana Lima",
+    "status": "Active",
+    "department": "Recursos Humanos",
+    "jobTitle": "Analista de RH",
+    "extendedAttributes": {
+      "email": "mariana.lima2@example.com"
+    }
+  },
+  {
+    "id": "EMP-005",
+    "fullName": "José d'Ávila",
+    "status": "Active",
+    "department": "Tecnologia",
+    "jobTitle": "Engenheiro de Dados",
+    "extendedAttributes": {
+      "email": "jose.davila@example.com"
+    }
+  },
+  {
+    "id": "EMP-006",
+    "fullName": "Felipe Gomes",
+    "status": "Active",
+    "department": "Tecnologia",
+    "jobTitle": "Engenheiro DevOps",
+    "extendedAttributes": {}
+  }
+]

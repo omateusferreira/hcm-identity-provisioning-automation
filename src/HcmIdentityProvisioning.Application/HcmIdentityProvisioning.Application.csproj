@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>HcmIdentityProvisioning.Application</PackageId>
+    <Version>1.1.0</Version>
+    <Authors>Mateus Ferreira</Authors>
+    <Company>Mateus Ferreira</Company>
+    <Copyright>Copyright (c) 2026 Mateus Ferreira. All rights reserved.</Copyright>
+    <Description>Enterprise Application Use Cases and Services for HCM Identity Provisioning</Description>
+    <PackageTags>iam; entra-id; use-cases; application; reconciliation; hcm</PackageTags>
+    <PackageProjectUrl>https://github.com/omateusferreira/hcm-identity-provisioning-automation</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/omateusferreira/hcm-identity-provisioning-automation</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>Versão 1.1.0: Primeira versão oficial do motor corporativo de provisionamento HCM para Microsoft Entra ID Free e Admin CLI SDK.</PackageReleaseNotes>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HcmIdentityProvisioning.Domain\HcmIdentityProvisioning.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
