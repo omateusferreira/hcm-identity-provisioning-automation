@@ -4,9 +4,9 @@
 [![C# 14](https://img.shields.io/badge/C%23-14-239120?logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
 [![Azure Functions](https://img.shields.io/badge/Azure%20Functions-v4%20Isolated-0062AD?logo=azurefunctions)](https://learn.microsoft.com/azure/azure-functions/)
 [![Microsoft Graph v5](https://img.shields.io/badge/Microsoft%20Graph-SDK%20v5-0078D4?logo=microsoft)](https://learn.microsoft.com/graph/)
-[![NuGet Engine](https://img.shields.io/badge/NuGet-HcmIdentityProvisioning%20v1.1.0-004880?logo=nuget)](https://github.com/omateusferreira/hcm-identity-provisioning-automation)
-[![NuGet Admin](https://img.shields.io/badge/NuGet-HcmIdentityProvisioning.Admin%20v1.1.0-004880?logo=nuget)](https://github.com/omateusferreira/hcm-identity-provisioning-automation)
-[![Tests](https://img.shields.io/badge/Tests-235%20Passed-success)](tests/)
+[![NuGet Engine](https://img.shields.io/badge/NuGet-HcmIdentityProvisioning%20v1.1.1-004880?logo=nuget)](https://github.com/omateusferreira/hcm-identity-provisioning-automation)
+[![NuGet Admin](https://img.shields.io/badge/NuGet-HcmIdentityProvisioning.Admin%20v1.1.1-004880?logo=nuget)](https://github.com/omateusferreira/hcm-identity-provisioning-automation)
+[![Tests](https://img.shields.io/badge/Tests-239%20Passed-success)](tests/)
 
 Motor corporativo de governança e automação do ciclo de vida de identidades (**IAM / IGA / ILM**) que sincroniza os colaboradores de sistemas de Recursos Humanos / HCM (Human Capital Management) com o **Microsoft Entra ID** (antigo Azure AD).
 
@@ -206,7 +206,7 @@ A solução é distribuída em **dois pacotes oficiais de alto nível** orientad
 Destinado a aplicações de backend, microsserviços, Azure Functions, daemons ou Windows/Linux Worker Services que executam a automação e reconciliação contínua de identidades:
 
 ```bash
-dotnet add package HcmIdentityProvisioning --version 1.1.0
+dotnet add package HcmIdentityProvisioning --version 1.1.1
 ```
 
 #### Registro Fluente no `Program.cs` (`IServiceCollection`):
@@ -246,7 +246,7 @@ app.MapPost("/api/sync", async (ReconcileBatchUseCase useCase, CancellationToken
 Destinado a engenheiros de IAM e equipes de infraestrutura que desejam construir **suas próprias ferramentas de console e automações de linha de comando corporativas**:
 
 ```bash
-dotnet add package HcmIdentityProvisioning.Admin --version 1.1.0
+dotnet add package HcmIdentityProvisioning.Admin --version 1.1.1
 ```
 
 #### Criando um Utilitário CLI Corporativo em 10 linhas (`Program.cs`):

@@ -30,7 +30,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>HcmIdentityProvisioning</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Authors>Mateus Ferreira</Authors>
     <Company>Mateus Ferreira</Company>
     <Copyright>Copyright (c) 2026 Mateus Ferreira. All rights reserved.</Copyright>
@@ -41,7 +41,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Versão 1.1.0: Primeira versão oficial do motor corporativo de provisionamento HCM para Microsoft Entra ID Free e Admin CLI SDK.</PackageReleaseNotes>
+    <PackageReleaseNotes>Versão 1.1.1: Correção de resolução de URIs REST em sistemas Unix/Linux e melhorias de resiliência.</PackageReleaseNotes>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <IsPackable>true</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
