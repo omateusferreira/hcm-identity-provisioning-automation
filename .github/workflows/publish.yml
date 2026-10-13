@@ -1,9 +1,6 @@
 name: Publish to NuGet
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       publish_to_nuget:
