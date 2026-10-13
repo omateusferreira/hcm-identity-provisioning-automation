@@ -5,8 +5,8 @@
 - **Status:** Aprovado para Implementação
 - **Target Runtime:** .NET 10 (`net10.0`), C# 14 / Azure Functions (.NET Isolated Worker)
 - **Target Ecosystem:** Microsoft Entra ID (Free tier compatible, zero P1/P2 dependency) & Generic HCM REST APIs
-- **Artefato Base:** [`docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md`](file:///d:/Projects/hcm-identity-provisioning-automation/docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md)
-- **Macro Roadmap:** [`docs/superpowers/execution-roadmap.md`](file:///d:/Projects/hcm-identity-provisioning-automation/docs/superpowers/execution-roadmap.md)
+- **Artefato Base:** [`docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md`](docs/superpowers/specs/2026-10-05-hcm-entra-id-provisioning-design.md)
+- **Macro Roadmap:** [`docs/superpowers/execution-roadmap.md`](docs/superpowers/execution-roadmap.md)
 
 ---
 

@@ -45,16 +45,29 @@ public sealed class DryRunAuditUseCase
 
         var managedGroups = await _identityStore.GetManagedGroupsAsync(ct);
         var allocatedUpns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenEmployeeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         while (hasNext)
         {
             var paged = await _connector.GetEmployeesPageAsync(page, _settings.BatchPageSize, ct);
             total += paged.Items.Count;
 
-            var existingUsers = await _identityStore.GetUsersByEmployeeIdsAsync(paged.Items.Select(e => e.Id), ct);
+            var uniqueEmployees = paged.Items
+                .Where(emp => seenEmployeeIds.Add(emp.Id.Value))
+                .ToList();
+
+            if (uniqueEmployees.Count == 0 && paged.Items.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Potential cycle detected in HCM connector pagination: all {Count} employees on page {Page} were previously seen. Halting dry-run pagination.",
+                    paged.Items.Count, page);
+                break;
+            }
+
+            var existingUsers = await _identityStore.GetUsersByEmployeeIdsAsync(uniqueEmployees.Select(e => e.Id), ct);
             var batchActions = new List<DeltaAction>();
 
-            foreach (var emp in paged.Items)
+            foreach (var emp in uniqueEmployees)
             {
                 existingUsers.TryGetValue(emp.Id, out var existing);
                 var actions = await _reconciler.ReconcileEmployeeAsync(
@@ -78,7 +91,7 @@ public sealed class DryRunAuditUseCase
                 batchActions.AddRange(actions);
             }
 
-            if (!tripped && _circuitBreaker.ShouldTrip(paged.Items.Count, batchActions, out var reason))
+            if (!tripped && _circuitBreaker.ShouldTrip(uniqueEmployees.Count, batchActions, out var reason))
             {
                 tripped = true;
                 breakerMsg = reason;

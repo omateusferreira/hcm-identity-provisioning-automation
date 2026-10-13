@@ -341,4 +341,60 @@ public class ReconcileBatchUseCaseTests
             Arg.Any<CancellationToken>()
         );
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenConnectorRepeatsEmployeesInSubsequentPage_HaltsPaginationToPreventCycle()
+    {
+        var connector = Substitute.For<IHcmConnector>();
+        var store = Substitute.For<IIdentityStore>();
+        var rules = Substitute.For<IRulesEngine>();
+        var pwdGen = Substitute.For<ISecurePasswordGenerator>();
+        var breaker = Substitute.For<ICircuitBreaker>();
+        var delivery = Substitute.For<ICredentialDeliveryService>();
+
+        pwdGen.GeneratePassword(Arg.Any<int>()).Returns("TempPassword123!");
+        rules.EvaluateDesiredGroupsAsync(Arg.Any<Employee>(), Arg.Any<CancellationToken>())
+            .Returns(new HashSet<string>());
+        store.IsUserPrincipalNameAvailableAsync(Arg.Any<UserPrincipalName>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        store.GetManagedGroupsAsync(Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ManagedGroup>());
+
+        var emp1 = new Employee(EmployeeId.Create("E1").Value, "Alice Smith", EmployeeStatus.Active, "Engineering", "Developer", new Dictionary<string, string>());
+
+        var paged1 = new PagedResult<Employee>(new[] { emp1 }, 1, 50, 1, true);
+        var paged2 = new PagedResult<Employee>(new[] { emp1 }, 2, 50, 1, true);
+        var paged3 = new PagedResult<Employee>(new[] { emp1 }, 3, 50, 1, false);
+
+        connector.GetEmployeesPageAsync(1, 50, Arg.Any<CancellationToken>()).Returns(paged1);
+        connector.GetEmployeesPageAsync(2, 50, Arg.Any<CancellationToken>()).Returns(paged2);
+        connector.GetEmployeesPageAsync(3, 50, Arg.Any<CancellationToken>()).Returns(paged3);
+
+        store.GetUsersByEmployeeIdsAsync(Arg.Any<IEnumerable<EmployeeId>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<EmployeeId, EntraUser>());
+
+        breaker.ShouldTrip(Arg.Any<int>(), Arg.Any<IReadOnlyList<Domain.Actions.DeltaAction>>(), out Arg.Any<string>())
+            .Returns(false);
+
+        var reconciler = new IdentityReconciliationService(rules, pwdGen);
+        var settings = new SyncSettings { TenantDomain = "corp.com", BatchPageSize = 50 };
+
+        var useCase = new ReconcileBatchUseCase(
+            connector,
+            store,
+            reconciler,
+            breaker,
+            delivery,
+            settings,
+            NullLogger<ReconcileBatchUseCase>.Instance
+        );
+
+        var report = await useCase.ExecuteAsync();
+
+        report.TotalProcessed.Should().Be(2);
+        report.CreatedCount.Should().Be(1);
+        await connector.Received(1).GetEmployeesPageAsync(1, 50, Arg.Any<CancellationToken>());
+        await connector.Received(1).GetEmployeesPageAsync(2, 50, Arg.Any<CancellationToken>());
+        await connector.DidNotReceive().GetEmployeesPageAsync(3, 50, Arg.Any<CancellationToken>());
+    }
 }

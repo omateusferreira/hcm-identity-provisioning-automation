@@ -1,11 +1,11 @@
 using System.CommandLine;
-using HcmIdentityProvisioning.Cli.Utils;
+using HcmIdentityProvisioning.Admin.Utils;
 using HcmIdentityProvisioning.Domain.Entities;
 using HcmIdentityProvisioning.Domain.Enums;
 using HcmIdentityProvisioning.Domain.ValueObjects;
 using HcmIdentityProvisioning.Infrastructure.Rules;
 
-namespace HcmIdentityProvisioning.Cli.Commands;
+namespace HcmIdentityProvisioning.Admin.Commands;
 
 public static class ValidateRulesCommand
 {

@@ -72,7 +72,7 @@ public sealed class IdentityReconciliationService
             {
                 if (caseInsensitiveManagedGroups.TryGetValue(groupName, out var group))
                 {
-                    actions.Add(new AddGroupMemberAction(Guid.Empty, group.Id, group.DisplayName));
+                    actions.Add(new AddGroupMemberAction(Guid.Empty, group.Id, group.DisplayName, employee.Id));
                 }
                 else
                 {

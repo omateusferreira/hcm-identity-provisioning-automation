@@ -21,11 +21,21 @@ namespace HcmIdentityProvisioning.Infrastructure.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
+    public static IHcmProvisioningBuilder AddHcmProvisioning(
+        this IServiceCollection services,
+        SyncSettings settings,
+        string rulesJsonPath)
+    {
+        services.AddHcmProvisioningCore(settings, rulesJsonPath);
+        return new HcmProvisioningBuilder(services, settings);
+    }
+
     public static IServiceCollection AddHcmProvisioningCore(
         this IServiceCollection services,
         SyncSettings settings,
         string rulesJsonPath)
     {
+        services.AddLogging();
         services.AddSingleton(settings);
         services.AddSingleton<ISecurePasswordGenerator, SecurePasswordGenerator>();
         services.AddSingleton<ICircuitBreaker>(_ => new DisablementCircuitBreaker(settings.MaxDisablementPercentage, settings.MaxDisablementCount));
@@ -33,6 +43,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IdentityReconciliationService>();
         services.AddTransient<ReconcileBatchUseCase>();
         services.AddTransient<DryRunAuditUseCase>();
+        services.AddTransient<EnsureManagedGroupsUseCase>();
 
         return services;
     }
@@ -150,6 +161,39 @@ public static class ServiceCollectionExtensions
 
         services.AddTransient<IHcmConnector>(sp => sp.GetRequiredService<GenericRestHcmConnector>());
 
+        return services;
+    }
+
+    public static IServiceCollection AddGraphEmailCredentialDeliveryService(
+        this IServiceCollection services,
+        Action<GraphEmailDeliveryOptions>? configureOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddOptions();
+        if (configureOptions != null)
+        {
+            services.Configure(configureOptions);
+        }
+
+        services.AddSingleton<GraphEmailCredentialDeliveryService>(sp =>
+        {
+            var graphClient = sp.GetService<GraphServiceClient>()
+                ?? sp.GetService<EntraIdGraphAdapter>()?.GraphClient;
+
+            if (graphClient == null)
+            {
+                var entraOptions = sp.GetService<IOptions<EntraIdGraphOptions>>()?.Value;
+                var credential = entraOptions?.CustomCredential ?? new Azure.Identity.DefaultAzureCredential();
+                graphClient = new GraphServiceClient(credential);
+            }
+
+            var options = sp.GetRequiredService<IOptions<GraphEmailDeliveryOptions>>();
+            var logger = sp.GetService<ILogger<GraphEmailCredentialDeliveryService>>() ?? NullLogger<GraphEmailCredentialDeliveryService>.Instance;
+            return new GraphEmailCredentialDeliveryService(graphClient, options, logger);
+        });
+
+        services.AddSingleton<ICredentialDeliveryService>(sp => sp.GetRequiredService<GraphEmailCredentialDeliveryService>());
         return services;
     }
 }

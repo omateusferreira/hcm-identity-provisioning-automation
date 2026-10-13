@@ -1,4 +1,4 @@
-namespace HcmIdentityProvisioning.Cli.Utils;
+namespace HcmIdentityProvisioning.Admin.Utils;
 
 /// <summary>
 /// Provides secure file path resolution for configuration and data assets.
@@ -10,11 +10,11 @@ public static class PathResolver
     private const string RulesFileName = "rules.json";
     private const string FixturesFileName = "synthetic-employees.json";
 
-    public static string ResolveRulesPath(string? explicitPath = null)
+    public static string ResolveRulesPath(string? customPath = null)
     {
-        if (!string.IsNullOrWhiteSpace(explicitPath))
+        if (!string.IsNullOrWhiteSpace(customPath))
         {
-            var fullPath = Path.GetFullPath(explicitPath);
+            var fullPath = Path.GetFullPath(customPath);
             if (!File.Exists(fullPath))
             {
                 throw new FileNotFoundException($"The specified rules file was not found: '{fullPath}'", fullPath);
@@ -73,11 +73,11 @@ public static class PathResolver
             "or specify the path via the RULES_FILE_PATH environment variable or --rules CLI option.");
     }
 
-    public static string ResolveFixturesPath(string? explicitPath = null)
+    public static string ResolveFixturesPath(string? customPath = null)
     {
-        if (!string.IsNullOrWhiteSpace(explicitPath))
+        if (!string.IsNullOrWhiteSpace(customPath))
         {
-            var fullPath = Path.GetFullPath(explicitPath);
+            var fullPath = Path.GetFullPath(customPath);
             if (!File.Exists(fullPath))
             {
                 throw new FileNotFoundException($"The specified fixtures file was not found: '{fullPath}'", fullPath);
