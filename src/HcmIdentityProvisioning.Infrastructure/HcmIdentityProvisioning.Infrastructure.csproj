@@ -10,18 +10,46 @@
     <PackageReference Include="RulesEngine" Version="5.0.6" />
     <PackageReference Include="System.Linq.Dynamic.Core" Version="1.6.0.2" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Graph" Version="5.71.0" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.2" />
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="Rules\rules.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageId>HcmIdentityProvisioning</PackageId>
+    <Version>1.1.0</Version>
+    <Authors>Mateus Ferreira</Authors>
+    <Company>Mateus Ferreira</Company>
+    <Copyright>Copyright (c) 2026 Mateus Ferreira. All rights reserved.</Copyright>
+    <Description>Enterprise Microsoft Entra ID SCIM/HCM Provisioning &amp; Reconciliation Engine</Description>
+    <PackageTags>iam; entra-id; azure-ad; identity-governance; provisioning; scim; hcm; lifecycle-management; serverless; active-directory</PackageTags>
+    <PackageProjectUrl>https://github.com/omateusferreira/hcm-identity-provisioning-automation</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/omateusferreira/hcm-identity-provisioning-automation</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>Versão 1.1.0: Primeira versão oficial do motor corporativo de provisionamento HCM para Microsoft Entra ID Free e Admin CLI SDK.</PackageReleaseNotes>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
 </Project>
