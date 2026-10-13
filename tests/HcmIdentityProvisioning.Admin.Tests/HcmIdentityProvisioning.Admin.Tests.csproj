@@ -23,4 +23,11 @@
     <ProjectReference Include="..\..\src\HcmIdentityProvisioning.Admin\HcmIdentityProvisioning.Admin.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\fixtures\synthetic-employees.json">
+      <Link>fixtures\synthetic-employees.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
