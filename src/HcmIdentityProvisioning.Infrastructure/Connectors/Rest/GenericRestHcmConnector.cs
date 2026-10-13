@@ -49,7 +49,8 @@ public sealed class GenericRestHcmConnector : IHcmConnector
 
     private Uri ResolveRequestUri(string pageUri)
     {
-        if (Uri.TryCreate(pageUri, UriKind.Absolute, out var absoluteUri))
+        if (Uri.TryCreate(pageUri, UriKind.Absolute, out var absoluteUri) &&
+            (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps))
         {
             return absoluteUri;
         }
