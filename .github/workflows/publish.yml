@@ -47,7 +47,7 @@ jobs:
         id: login
         uses: NuGet/login@v1
         with:
-          user: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+          user: ${{ secrets.NUGET_USER }}
 
       - name: Push Packages to NuGet.org
         run: |
