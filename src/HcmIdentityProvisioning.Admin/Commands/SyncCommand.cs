@@ -6,6 +6,7 @@ using HcmIdentityProvisioning.Admin.Extensibility;
 using HcmIdentityProvisioning.Admin.Utils;
 using HcmIdentityProvisioning.Application.Models;
 using HcmIdentityProvisioning.Application.UseCases;
+using HcmIdentityProvisioning.Domain.Ports;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HcmIdentityProvisioning.Admin.Commands;
@@ -59,7 +60,10 @@ public static class SyncCommand
             .FirstOrDefault(o => o.Aliases.Contains("--fixtures") || o.Name == "fixtures")
             ?? new Option<FileInfo?>(
                 name: "--fixtures",
-                description: "Path to synthetic-employees.json file (defaults to application bundle or FIXTURES_FILE_PATH).");
+                description: "Path to synthetic-employees.json file (defaults to application bundle or FIXTURES_FILE_PATH).")
+            {
+                Arity = ArgumentArity.ZeroOrOne
+            };
 
         var idpOption = new Option<string>(
             name: "--idp",
@@ -166,6 +170,19 @@ public static class SyncCommand
 
             try
             {
+                var connector = scope.ServiceProvider.GetService<IHcmConnector>();
+                var dryRunUseCase = scope.ServiceProvider.GetService<DryRunAuditUseCase>();
+
+                if (connector == null && dryRunUseCase == null)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Error.WriteLine("Error: No HCM connector configured. Specify an HCM connector (e.g. '--fixtures' for synthetic test data, or '--rest-url') or register a custom IHcmConnector.");
+                    Console.ResetColor();
+                    context.ExitCode = 1;
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
                 if (dryRun)
                 {
                     var useCase = scope.ServiceProvider.GetRequiredService<DryRunAuditUseCase>();

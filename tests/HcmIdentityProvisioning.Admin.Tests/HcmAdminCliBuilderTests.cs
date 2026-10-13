@@ -101,32 +101,96 @@ public class HcmAdminCliBuilderTests
     }
 
     [Fact]
-    public void BuildServiceProvider_WhenNoConnectorConfigured_FallsBackToSyntheticConnector()
+    public void BuildServiceProvider_WhenNoConnectorConfigured_DoesNotRegisterHcmConnector()
     {
         var currentDir = new DirectoryInfo(AppContext.BaseDirectory);
         string? rulesPath = null;
-        string? fixturesPath = null;
         while (currentDir != null)
         {
             var r = Path.Combine(currentDir.FullName, "src", "HcmIdentityProvisioning.Infrastructure", "Rules", "rules.json");
             if (File.Exists(r) && rulesPath == null) rulesPath = r;
-
-            var f = Path.Combine(currentDir.FullName, "fixtures", "synthetic-employees.json");
-            if (File.Exists(f) && fixturesPath == null) fixturesPath = f;
-
             currentDir = currentDir.Parent;
         }
 
         var builder = HcmAdminCliBuilder.Create([]);
         var options = new SyncCliOptions(
             RulesPath: rulesPath,
-            FixturesPath: fixturesPath,
             Idp: "in-memory"
         );
 
         var sp = builder.BuildServiceProvider(options);
-        var connector = sp.GetRequiredService<IHcmConnector>();
-        connector.Should().BeOfType<SyntheticHcmConnector>();
+        var connector = sp.GetService<IHcmConnector>();
+        connector.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunAsync_WithEnsureGroups_ExecutesSuccessfullyWithoutHcmConnectorOrFixtures()
+    {
+        var currentDir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? rulesPath = null;
+        while (currentDir != null)
+        {
+            var candidate = Path.Combine(currentDir.FullName, "src", "HcmIdentityProvisioning.Infrastructure", "Rules", "rules.json");
+            if (File.Exists(candidate))
+            {
+                rulesPath = candidate;
+                break;
+            }
+            currentDir = currentDir.Parent;
+        }
+
+        rulesPath.Should().NotBeNull("rules.json must exist in repository");
+
+        var builder = HcmAdminCliBuilder.Create(["ensure-groups", "--dry-run", "--rules", rulesPath!]);
+        var exitCode = await builder.RunAsync();
+        exitCode.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithSyncAndNoConnector_FailsWithExitCode1()
+    {
+        var currentDir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? rulesPath = null;
+        while (currentDir != null)
+        {
+            var candidate = Path.Combine(currentDir.FullName, "src", "HcmIdentityProvisioning.Infrastructure", "Rules", "rules.json");
+            if (File.Exists(candidate))
+            {
+                rulesPath = candidate;
+                break;
+            }
+            currentDir = currentDir.Parent;
+        }
+
+        rulesPath.Should().NotBeNull("rules.json must exist in repository");
+
+        var builder = HcmAdminCliBuilder.Create(["sync", "--dry-run", "--rules", rulesPath!]);
+        var exitCode = await builder.RunAsync();
+        exitCode.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithSyncAndFixturesFlag_ExecutesSuccessfully()
+    {
+        var currentDir = new DirectoryInfo(AppContext.BaseDirectory);
+        string? rulesPath = null;
+        while (currentDir != null)
+        {
+            var candidate = Path.Combine(currentDir.FullName, "src", "HcmIdentityProvisioning.Infrastructure", "Rules", "rules.json");
+            if (File.Exists(candidate))
+            {
+                rulesPath = candidate;
+                break;
+            }
+            currentDir = currentDir.Parent;
+        }
+
+        rulesPath.Should().NotBeNull("rules.json must exist in repository");
+
+        var builder = HcmAdminCliBuilder.Create(["sync", "--dry-run", "--rules", rulesPath!, "--fixtures"])
+            .AddConnector<SyntheticHcmConnectorCliDescriptor>();
+        var exitCode = await builder.RunAsync();
+        exitCode.Should().Be(0);
     }
 
     [Fact]

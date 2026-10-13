@@ -308,4 +308,19 @@ public class SyncCommandTests
         // Assert
         exitCode.Should().Be(1);
     }
+
+    [Fact]
+    public async Task InvokeAsync_WhenNoHcmConnectorRegistered_ReturnsExitCode1()
+    {
+        // Arrange - Service provider with no IHcmConnector registered
+        var services = new ServiceCollection();
+        var sp = services.BuildServiceProvider();
+        var cmd = SyncCommand.Create(sp);
+
+        // Act
+        var exitCode = await cmd.InvokeAsync(["--dry-run"]);
+
+        // Assert
+        exitCode.Should().Be(1);
+    }
 }

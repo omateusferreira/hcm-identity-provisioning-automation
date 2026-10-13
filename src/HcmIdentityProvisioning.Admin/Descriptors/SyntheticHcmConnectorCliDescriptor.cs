@@ -15,15 +15,23 @@ public sealed class SyntheticHcmConnectorCliDescriptor : IHcmConnectorCliDescrip
 
     private readonly Option<FileInfo?> _fixturesOption = new(
         name: "--fixtures",
-        description: "Path to synthetic-employees.json file (defaults to application bundle or FIXTURES_FILE_PATH).");
+        description: "Path to synthetic-employees.json file (defaults to application bundle or FIXTURES_FILE_PATH).")
+    {
+        Arity = ArgumentArity.ZeroOrOne
+    };
 
     public IReadOnlyList<Option> GetCliOptions() => [_fixturesOption];
 
     public void ConfigureServices(IServiceCollection services, ParseResult parseResult, SyncCliOptions baseOptions)
     {
+        var hasOption = parseResult.HasOption(_fixturesOption);
         var fixturesFile = parseResult.GetValueForOption(_fixturesOption);
-        var fixturesPath = fixturesFile?.FullName ?? baseOptions.FixturesPath;
-        var resolvedPath = PathResolver.ResolveFixturesPath(fixturesPath);
-        services.AddSyntheticHcmConnector(resolvedPath);
+        var customPath = fixturesFile?.FullName ?? (!string.IsNullOrWhiteSpace(baseOptions.FixturesPath) ? baseOptions.FixturesPath : null);
+
+        if (hasOption || !string.IsNullOrWhiteSpace(baseOptions.FixturesPath))
+        {
+            var resolvedPath = PathResolver.ResolveFixturesPath(customPath);
+            services.AddSyntheticHcmConnector(resolvedPath);
+        }
     }
 }

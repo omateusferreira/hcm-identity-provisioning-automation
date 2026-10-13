@@ -111,8 +111,9 @@ public sealed class HcmAdminCliBuilder
             config(rootCommand);
         }
 
+        Environment.ExitCode = 0;
         var exitCode = await rootCommand.InvokeAsync(_args);
-        return Environment.ExitCode != 0 ? Environment.ExitCode : exitCode;
+        return exitCode != 0 ? exitCode : Environment.ExitCode;
     }
 
     public IServiceProvider BuildServiceProvider(SyncCliOptions options, ParseResult? parseResult = null, bool isVerbose = false)
@@ -180,13 +181,6 @@ public sealed class HcmAdminCliBuilder
         foreach (var config in _serviceConfigurators)
         {
             config(services);
-        }
-
-        // Se nenhum conector tiver sido registrado por descriptor ou serviço, registra SyntheticConnector como default
-        if (!services.Any(sd => sd.ServiceType == typeof(IHcmConnector)))
-        {
-            var fixturesPath = PathResolver.ResolveFixturesPath(options.FixturesPath);
-            services.AddSyntheticHcmConnector(fixturesPath);
         }
 
         return services.BuildServiceProvider();
