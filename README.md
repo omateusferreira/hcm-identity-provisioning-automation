@@ -4,7 +4,9 @@
 [![C# 14](https://img.shields.io/badge/C%23-14-239120?logo=csharp)](https://docs.microsoft.com/dotnet/csharp/)
 [![Azure Functions](https://img.shields.io/badge/Azure%20Functions-v4%20Isolated-0062AD?logo=azurefunctions)](https://learn.microsoft.com/azure/azure-functions/)
 [![Microsoft Graph v5](https://img.shields.io/badge/Microsoft%20Graph-SDK%20v5-0078D4?logo=microsoft)](https://learn.microsoft.com/graph/)
-[![Tests](https://img.shields.io/badge/Tests-204%20Passed-success)](tests/)
+[![NuGet Engine](https://img.shields.io/badge/NuGet-HcmIdentityProvisioning%20v1.1.0-004880?logo=nuget)](https://github.com/omateusferreira/hcm-identity-provisioning-automation)
+[![NuGet Admin](https://img.shields.io/badge/NuGet-HcmIdentityProvisioning.Admin%20v1.1.0-004880?logo=nuget)](https://github.com/omateusferreira/hcm-identity-provisioning-automation)
+[![Tests](https://img.shields.io/badge/Tests-235%20Passed-success)](tests/)
 
 Motor corporativo de governança e automação do ciclo de vida de identidades (**IAM / IGA / ILM**) que sincroniza os colaboradores de sistemas de Recursos Humanos / HCM (Human Capital Management) com o **Microsoft Entra ID** (antigo Azure AD).
 
@@ -22,18 +24,21 @@ Projetado sob os princípios de **Clean Architecture**, **Hexagonal Architecture
   - [2.4 Disablement Circuit Breaker](#24-disablement-circuit-breaker)
   - [2.5 Entrega Out-of-Band de Credenciais via Shared Mailbox](#25-entrega-out-of-band-de-credenciais-via-shared-mailbox)
 - [3. Estrutura da Solução](#3-estrutura-da-solução)
-- [4. Guia para Novos Desenvolvedores (Ambiente Local)](#4-guia-para-novos-desenvolvedores-ambiente-local)
-  - [4.1 Pré-requisitos](#41-pré-requisitos)
-  - [4.2 Compilação & Testes](#42-compilação--testes)
-  - [4.3 Executando o CLI (Modo Offline & Sandbox Entra ID Real)](#43-executando-o-cli-modo-offline--sandbox-entra-id-real)
-  - [4.4 Estendendo e Adicionando Novos Conectores HCM](#44-estendendo-e-adicionando-novos-conectores-hcm)
-  - [4.5 Boas Práticas Corporativas: Fork Privado & Atualizações Upstream](#45-boas-práticas-corporativas-fork-privado--atualizações-upstream)
-- [5. Guia de Implantação & Deployment (Azure Cloud)](#5-guia-de-implantação--deployment-azure-cloud)
-  - [5.1 Pré-requisitos no Azure & Microsoft 365](#51-pré-requisitos-no-azure--microsoft-365)
-  - [5.2 Configuração da Shared Mailbox & Política de Menor Privilégio](#52-configuração-da-shared-mailbox--política-de-menor-privilégio)
-  - [5.3 Configuração do Azure Functions App](#53-configuração-do-azure-functions-app)
-  - [5.4 Disparo Manual e Diagnósticos](#54-disparo-manual-e-diagnósticos)
-  - [5.5 Observabilidade & Monitoramento (Application Insights)](#55-observabilidade--monitoramento-application-insights)
+- [4. Consumo via Pacotes NuGet (Recomendado)](#4-consumo-via-pacotes-nuget-recomendado)
+  - [4.1 HcmIdentityProvisioning (Core Engine)](#41-hcmidentityprovisioning-core-engine)
+  - [4.2 HcmIdentityProvisioning.Admin (CLI SDK)](#42-hcmidentityprovisioningadmin-cli-sdk)
+- [5. Guia para Novos Desenvolvedores (Ambiente Local)](#5-guia-para-novos-desenvolvedores-ambiente-local)
+  - [5.1 Pré-requisitos](#51-pré-requisitos)
+  - [5.2 Compilação & Testes](#52-compilação--testes)
+  - [5.3 Executando o CLI (Modo Offline & Sandbox Entra ID Real)](#53-executando-o-cli-modo-offline--sandbox-entra-id-real)
+  - [5.4 Estendendo e Adicionando Novos Conectores HCM](#54-estendendo-e-adicionando-novos-conectores-hcm)
+  - [5.5 Boas Práticas Corporativas: Fork Privado & Atualizações Upstream](#55-boas-práticas-corporativas-fork-privado--atualizações-upstream)
+- [6. Guia de Implantação & Deployment (Azure Cloud)](#6-guia-de-implantação--deployment-azure-cloud)
+  - [6.1 Pré-requisitos no Azure & Microsoft 365](#61-pré-requisitos-no-azure--microsoft-365)
+  - [6.2 Configuração da Shared Mailbox & Política de Menor Privilégio](#62-configuração-da-shared-mailbox--política-de-menor-privilégio)
+  - [6.3 Configuração do Azure Functions App](#63-configuração-do-azure-functions-app)
+  - [6.4 Disparo Manual e Diagnósticos](#64-disparo-manual-e-diagnósticos)
+  - [6.5 Observabilidade & Monitoramento (Application Insights)](#65-observabilidade--monitoramento-application-insights)
 
 ---
 
@@ -160,20 +165,24 @@ HcmIdentityProvisioning.sln
 │   │   ├── Services/                             # IdentityReconciliationService
 │   │   └── UseCases/                             # ReconcileBatchUseCase, DryRunAuditUseCase
 │   │
-│   ├── HcmIdentityProvisioning.Infrastructure/   # Adaptadores de I/O e Nuvem
+│   ├── HcmIdentityProvisioning.Infrastructure/   # Adaptadores de I/O, Nuvem e Pacote HcmIdentityProvisioning
 │   │   ├── Connectors/                           # GenericRestHcmConnector, SyntheticHcmConnector
-│   │   ├── DependencyInjection/                  # ServiceCollectionExtensions
+│   │   ├── DependencyInjection/                  # ServiceCollectionExtensions & IHcmProvisioningBuilder
 │   │   ├── Graph/                                # EntraIdGraphAdapter, InMemoryIdentityStore
 │   │   ├── Notifications/                        # GraphEmailCredentialDeliveryService
 │   │   ├── Policies/                             # DisablementCircuitBreaker
 │   │   ├── Rules/                                # MicrosoftRulesEngineAdapter & rules.json
 │   │   └── Security/                             # SecurePasswordGenerator, UpnSanitizer
 │   │
-│   ├── HcmIdentityProvisioning.Cli/              # Console Runner Local & Sandbox
-│   │   ├── Commands/                             # SyncCommand, ValidateRulesCommand
+│   ├── HcmIdentityProvisioning.Admin/            # SDK e Tooling CLI Administrativo (HcmIdentityProvisioning.Admin)
+│   │   ├── Commands/                             # SyncCommand, EnsureGroupsCommand, ValidateRulesCommand
+│   │   ├── Descriptors/                          # Descriptors extensíveis de linha de comando
+│   │   └── HcmAdminCliBuilder.cs                 # Fluent Builder para utilitários de console
+│   │
+│   ├── HcmIdentityProvisioning.Cli/              # Console Runner Local & Sandbox (Dogfooding)
 │   │   └── Program.cs
 │   │
-│   └── HcmIdentityProvisioning.Functions/        # Host Serverless de Nuvem
+│   └── HcmIdentityProvisioning.Functions/        # Host Serverless de Nuvem de Referência
 │       ├── Functions/                            # SyncTimerFunction (TimerTrigger cron)
 │       ├── host.json / local.settings.json
 │       └── Program.cs                            # Composition Root de Produção
@@ -182,30 +191,101 @@ HcmIdentityProvisioning.sln
     ├── HcmIdentityProvisioning.Domain.Tests/
     ├── HcmIdentityProvisioning.Application.Tests/
     ├── HcmIdentityProvisioning.Infrastructure.Tests/
+    ├── HcmIdentityProvisioning.Admin.Tests/
     ├── HcmIdentityProvisioning.Functions.Tests/
     └── HcmIdentityProvisioning.Cli.Tests/
 ```
 
 ---
 
-## 4. Guia para Novos Desenvolvedores (Ambiente Local)
+## 4. Consumo via Pacotes NuGet (Recomendado)
 
-### 4.1 Pré-requisitos
+A solução é distribuída em **dois pacotes oficiais de alto nível** orientados à intenção de uso (*Package by Intent*), permitindo que você consuma o motor ou o ferramental CLI em qualquer aplicação .NET:
+
+### 4.1 `HcmIdentityProvisioning` (Core Engine)
+Destinado a aplicações de backend, microsserviços, Azure Functions, daemons ou Windows/Linux Worker Services que executam a automação e reconciliação contínua de identidades:
+
+```bash
+dotnet add package HcmIdentityProvisioning --version 1.1.0
+```
+
+#### Registro Fluente no `Program.cs` (`IServiceCollection`):
+```csharp
+using HcmIdentityProvisioning.Application.Options;
+using HcmIdentityProvisioning.Application.UseCases;
+using HcmIdentityProvisioning.Infrastructure.DependencyInjection;
+
+var syncSettings = new SyncSettings
+{
+    TenantDomain = "suaempresa.onmicrosoft.com",
+    ManagedGroupPrefix = "grp-iam-",
+    BatchPageSize = 50,
+    MaxDisablementPercentage = 10.0,
+    MaxDisablementCount = 25
+};
+
+builder.Services.AddHcmProvisioning(syncSettings, rulesJsonPath: "rules.json")
+    .AddEntraIdStore(opts => opts.TenantDomain = "suaempresa.onmicrosoft.com")
+    .AddGenericRestConnector(opts => opts.Endpoint = "https://rh.suaempresa.com.br/api/colaboradores")
+    .AddGraphEmailCredentialDelivery(opts => opts.SenderEmail = "no-reply@suaempresa.com.br");
+```
+
+#### Executando a Reconciliação no seu Serviço:
+```csharp
+// Em um endpoint HTTP, Message Handler ou Timer Worker:
+app.MapPost("/api/sync", async (ReconcileBatchUseCase useCase, CancellationToken ct) =>
+{
+    var report = await useCase.ExecuteAsync(ct);
+    return Results.Ok(report);
+});
+```
+
+---
+
+### 4.2 `HcmIdentityProvisioning.Admin` (CLI SDK)
+Destinado a engenheiros de IAM e equipes de infraestrutura que desejam construir **suas próprias ferramentas de console e automações de linha de comando corporativas**:
+
+```bash
+dotnet add package HcmIdentityProvisioning.Admin --version 1.1.0
+```
+
+#### Criando um Utilitário CLI Corporativo em 10 linhas (`Program.cs`):
+```csharp
+using HcmIdentityProvisioning.Admin;
+using HcmIdentityProvisioning.Admin.Descriptors;
+
+var app = HcmAdminCliBuilder.Create(args)
+    .AddConnector<GenericRestHcmConnectorCliDescriptor>()
+    .ConfigureRootCommand(root =>
+    {
+        root.Description = "ACME Corp - Ferramenta de Linha de Comando para Governança IAM";
+    });
+
+return await app.RunAsync();
+```
+
+O executável resultante herda automaticamente os subcomandos `sync`, `ensure-groups` e `validate-rules`, prompts de confirmação interativos, mascaramento de senhas e ajuda formatada (`--help`).
+
+---
+
+## 5. Guia para Novos Desenvolvedores (Ambiente Local)
+
+### 5.1 Pré-requisitos
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) ou superior instalado.
 - [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local) (opcional, apenas para rodar a Function App localmente).
 
-### 4.2 Compilação & Testes
+### 5.2 Compilação & Testes
 Para restaurar dependências, compilar a solução e rodar toda a suíte de testes automatizados:
 
 ```bash
 # Compilar todos os projetos da solução
 dotnet build
 
-# Executar todos os 204 testes automatizados (Domain, Application, Infrastructure, Functions, Cli)
+# Executar todos os 235 testes automatizados (Domain, Application, Infrastructure, Functions, Cli, Admin)
 dotnet test
 ```
 
-### 4.3 Executando o CLI (Modo Offline & Sandbox Entra ID Real)
+### 5.3 Executando o CLI (Modo Offline & Sandbox Entra ID Real)
 
 A ferramenta administrativa CLI (`HcmIdentityProvisioning.Cli`) compartilha exatamente o mesmo motor de conciliação, regras e adaptadores do Azure Functions. Ela permite simular e validar o provisionamento tanto em modo offline (em memória) quanto diretamente contra um tenant sandbox real do Microsoft Entra ID.
 
@@ -305,7 +385,7 @@ dotnet run --project src/HcmIdentityProvisioning.Cli -- sync \
 > Caso seja executado em pipelines não interativos (CI/CD ou scripts com `stdin` redirecionado), o CLI aborta com código de saída `1` a menos que a flag `--yes` (ou `-y`) seja explicitamente informada.
 
 
-### 4.4 Estendendo e Adicionando Novos Conectores HCM
+### 5.4 Estendendo e Adicionando Novos Conectores HCM
 
 O motor é agnóstico a sistemas específicos (ex: Workday, TOTVS, SAP, Senior, BambooHR). Para integrar um novo sistema de RH:
 
@@ -324,7 +404,7 @@ O motor é agnóstico a sistemas específicos (ex: Workday, TOTVS, SAP, Senior, 
    ```
 3. Registre seu conector no `Program.cs` via DI (`services.AddSingleton<IHcmConnector, MyCustomHcmConnector>()`).
 
-### 4.5 Boas Práticas Corporativas: Fork Privado & Atualizações Upstream
+### 5.5 Boas Práticas Corporativas: Fork Privado & Atualizações Upstream
 
 Em ambientes corporativos, é fundamental **manter em sigilo** conectores de RH proprietários, esquemas de dados internos, endpoints de API locais e o arquivo `rules.json` da organização.
 
@@ -338,7 +418,7 @@ O padrão de engenharia recomendado é **adotar o projeto como um Fork Privado (
 > # 1. Crie um repositório VAZIO e PRIVADO no GitHub/GitLab (ex: hcm-provisioning-private)
 >
 > # 2. Clone o repositório público como bare mirror
-> git clone --bare https://github.com/mateus-iam/hcm-identity-provisioning-automation.git
+> git clone --bare https://github.com/omateusferreira/hcm-identity-provisioning-automation.git
 > cd hcm-identity-provisioning-automation.git
 >
 > # 3. Envie todo o histórico para o seu repositório privado
@@ -351,7 +431,7 @@ O padrão de engenharia recomendado é **adotar o projeto como um Fork Privado (
 > cd hcm-provisioning-private
 >
 > # 5. Configure o repositório open source como upstream para atualizações futuras
-> git remote add upstream https://github.com/mateus-iam/hcm-identity-provisioning-automation.git
+> git remote add upstream https://github.com/omateusferreira/hcm-identity-provisioning-automation.git
 > ```
 
 #### Como Sincronizar Atualizações do Open Source (`upstream`)
@@ -387,9 +467,9 @@ Para garantir que os futuros `git merge upstream/main` ocorram de forma automát
 
 ---
 
-## 5. Guia de Implantação & Deployment (Azure Cloud)
+## 6. Guia de Implantação & Deployment (Azure Cloud)
 
-### 5.1 Pré-requisitos no Azure & Microsoft 365
+### 6.1 Pré-requisitos no Azure & Microsoft 365
 
 1. **App Registration (Entra ID):**
    - Registre um aplicativo no Microsoft Entra ID para a automação.
@@ -400,7 +480,7 @@ Para garantir que os futuros `git merge upstream/main` ocorram de forma automát
 2. **Autenticação:**
    - Em produção no Azure, utilize **Azure Managed Identity** (System-Assigned ou User-Assigned) na Function App. O `DefaultAzureCredential` obterá os tokens de acesso automaticamente sem senhas fixas.
 
-### 5.2 Configuração da Shared Mailbox & Política de Menor Privilégio
+### 6.2 Configuração da Shared Mailbox & Política de Menor Privilégio
 
 Para evitar que a permissão `Mail.Send` conceda ao robô o poder de enviar e-mails em nome de qualquer usuário da organização:
 
@@ -417,7 +497,7 @@ Para evitar que a permissão `Mail.Send` conceda ao robô o poder de enviar e-ma
      -Description "Restringe o envio de e-mails da aplicacao IAM apenas para a caixa no-reply"
    ```
 
-### 5.3 Configuração do Azure Functions App
+### 6.3 Configuração do Azure Functions App
 
 Crie uma **Function App** no Azure utilizando:
 - **Stack:** .NET
@@ -442,7 +522,7 @@ Configure as seguintes **Application Settings (Variáveis de Ambiente)**:
 }
 ```
 
-### 5.4 Disparo Manual e Diagnósticos
+### 6.4 Disparo Manual e Diagnósticos
 
 A função opera sem expor webhooks ou rotas HTTP públicas para minimizar a superfície de ataque. Para forçar um disparo imediato sob demanda (por exemplo, durante a homologação ou para diagnóstico de problemas):
 
@@ -458,7 +538,7 @@ A função opera sem expor webhooks ou rotas HTTP públicas para minimizar a sup
      -d "{}"
    ```
 
-### 5.5 Observabilidade & Monitoramento (Application Insights)
+### 6.5 Observabilidade & Monitoramento (Application Insights)
 
 A aplicação emite telemetria semântica que popula automaticamente as colunas de `customDimensions` no Azure Monitor / Log Analytics.
 
